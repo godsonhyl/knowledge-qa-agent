@@ -1,0 +1,10 @@
+node_modules/
+dist/
+sslcert/
+*.log
+.env
+.env.*
+coverage/
+.DS_Store
+*.local
+selftest-report.txt

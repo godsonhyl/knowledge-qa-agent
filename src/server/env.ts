@@ -1,0 +1,97 @@
+/* ============================================================
+   server/env.ts —— 类型化环境变量
+   ============================================================ */
+import { createHash } from 'node:crypto';
+
+function bool(v: string | undefined, def: boolean): boolean {
+  if (v === undefined) return def;
+  return v === '1' || v === 'true' || v === 'yes';
+}
+function int(v: string | undefined, def: number): number {
+  const n = parseInt(v || '', 10);
+  return Number.isFinite(n) ? n : def;
+}
+
+export interface Env {
+  PORT: number;
+  HOST: string;
+  HTTPS_PORT: number;
+  GEN_CERT: boolean;
+
+  LLM_BASE_URL: string;
+  LLM_API_KEY: string;
+  LLM_MODEL: string;
+
+  EMBED_BASE_URL: string;
+  EMBED_API_KEY: string;
+  EMBED_MODEL: string;
+  EMBED_DIM: number;
+  EMBED_VECTOR_GATE: boolean;   // 向量证据门开关（校准不过先关）
+
+  QDRANT_URL: string;
+  COLLECTION_CHUNKS: string;
+  COLLECTION_DOCS: string;
+
+  CONFLUENCE_BASE_URL: string;
+  CONFLUENCE_PAT: string;
+  CONFLUENCE_INSECURE_TLS: boolean;
+  CONFLUENCE_MAX_PAGES: number;
+}
+
+export const ENV: Env = {
+  PORT: int(process.env.PORT, 3000),
+  HOST: process.env.HOST || '0.0.0.0',
+  HTTPS_PORT: int(process.env.HTTPS_PORT, 3443),
+  GEN_CERT: bool(process.env.GEN_CERT, false),
+
+  LLM_BASE_URL: (process.env.LLM_BASE_URL || '').replace(/\/+$/, ''),
+  LLM_API_KEY: process.env.LLM_API_KEY || '',
+  LLM_MODEL: process.env.LLM_MODEL || '',
+
+  EMBED_BASE_URL: (process.env.EMBED_BASE_URL || '').replace(/\/+$/, ''),
+  EMBED_API_KEY: process.env.EMBED_API_KEY || process.env.LLM_API_KEY || '',
+  EMBED_MODEL: process.env.EMBED_MODEL || 'BAAI/bge-m3',
+  EMBED_DIM: int(process.env.EMBED_DIM, 1024),
+  EMBED_VECTOR_GATE: bool(process.env.EMBED_VECTOR_GATE, true),
+
+  QDRANT_URL: (process.env.QDRANT_URL || 'http://qdrant:6333').replace(/\/+$/, ''),
+  COLLECTION_CHUNKS: process.env.COLLECTION_CHUNKS || 'kqa_chunks',
+  COLLECTION_DOCS: process.env.COLLECTION_DOCS || 'kqa_docs',
+
+  CONFLUENCE_BASE_URL: (process.env.CONFLUENCE_BASE_URL || '').replace(/\/+$/, ''),
+  CONFLUENCE_PAT: process.env.CONFLUENCE_PAT || '',
+  CONFLUENCE_INSECURE_TLS: bool(process.env.CONFLUENCE_INSECURE_TLS, false),
+  CONFLUENCE_MAX_PAGES: int(process.env.CONFLUENCE_MAX_PAGES, 200),
+};
+
+export function llmReady(): boolean {
+  return Boolean(ENV.LLM_BASE_URL && ENV.LLM_API_KEY && ENV.LLM_MODEL);
+}
+export function embedReady(): boolean {
+  return Boolean(ENV.EMBED_BASE_URL && ENV.EMBED_MODEL);
+}
+export function confluenceReady(): boolean {
+  return Boolean(ENV.CONFLUENCE_BASE_URL && ENV.CONFLUENCE_PAT);
+}
+
+export function safeHost(u: string): string {
+  try {
+    return new URL(u).host;
+  } catch {
+    return '';
+  }
+}
+
+/** POST /api/config 的安全下发（绝不包含任何 key） */
+export function configResp() {
+  return {
+    ready: llmReady(),
+    baseUrlHost: ENV.LLM_BASE_URL ? safeHost(ENV.LLM_BASE_URL) : '',
+    model: ENV.LLM_MODEL,
+    confluence: confluenceReady(),
+    embed: embedReady(),
+  };
+}
+
+// 防未使用告警
+void createHash;

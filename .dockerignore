@@ -1,0 +1,15 @@
+.git
+.gitignore
+*.log
+
+coverage
+tests
+scripts
+*.md
+.claude
+src
+tsconfig*.json
+vite.config.ts
+vitest.config.ts
+package-lock.json
+.env

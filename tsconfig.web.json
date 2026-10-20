@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist/web",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": [],
+    "paths": {
+      "@shared/*": ["./src/shared/*"],
+      "@server/*": ["./src/server/*"],
+      "@web/*": ["./src/web/*"]
+    }
+  },
+  "include": ["src/web/**/*", "src/shared/**/*"]
+}

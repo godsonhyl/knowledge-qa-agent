@@ -1,0 +1,65 @@
+# 知识问答 Agent —— TS 重构版（Hono + React + Qdrant）
+# 一键启动：docker compose up -d
+# 数据持久化到 Qdrant 命名卷；app 被杀会自动重启。
+
+services:
+  app:
+    build: .
+    image: knowledge-qa-agent-ts:latest
+    container_name: kqa-ts-app
+    restart: unless-stopped
+    ports:
+      - "${HOST_PORT:-3002}:3000"
+      - "${HTTPS_HOST_PORT:-3443}:3443"
+    environment:
+      PORT: "3000"
+      HOST: "0.0.0.0"
+      # ---- 大模型（OpenAI 兼容接口，服务端持有密钥）----
+      LLM_BASE_URL: "${LLM_BASE_URL:-}"
+      LLM_API_KEY: "${LLM_API_KEY:-}"
+      LLM_MODEL: "${LLM_MODEL:-}"
+      # ---- 嵌入（与 LLM 同网关）----
+      EMBED_BASE_URL: "${EMBED_BASE_URL:-${LLM_BASE_URL:-}}"
+      EMBED_API_KEY: "${EMBED_API_KEY:-${LLM_API_KEY:-}}"
+      EMBED_MODEL: "${EMBED_MODEL:-BAAI/bge-m3}"
+      EMBED_DIM: "${EMBED_DIM:-1024}"
+      EMBED_VECTOR_GATE: "${EMBED_VECTOR_GATE:-1}"
+      # ---- Qdrant（compose 内部网络）----
+      QDRANT_URL: "http://kqa-ts-qdrant:6333"
+      COLLECTION_CHUNKS: "kqa_chunks"
+      COLLECTION_DOCS: "kqa_docs"
+      # ---- Confluence（可选）----
+      CONFLUENCE_BASE_URL: "${CONFLUENCE_BASE_URL:-}"
+      CONFLUENCE_PAT: "${CONFLUENCE_PAT:-}"
+      CONFLUENCE_INSECURE_TLS: "${CONFLUENCE_INSECURE_TLS:-0}"
+      CONFLUENCE_MAX_PAGES: "${CONFLUENCE_MAX_PAGES:-200}"
+      # ---- 可选：自签 HTTPS（解锁浏览器安全上下文）----
+      GEN_CERT: "${GEN_CERT:-0}"
+      HTTPS_PORT: "${HTTPS_PORT:-3443}"
+    networks:
+      - kqa-ts-net
+    depends_on:
+      - qdrant
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/config').then(r=>process.exit(r.status===200?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  qdrant:
+    image: qdrant/qdrant:v1.11.3
+    container_name: kqa-ts-qdrant
+    restart: unless-stopped
+    volumes:
+      - kqa_ts_qdrant_data:/qdrant/storage
+    networks:
+      - kqa-ts-net
+
+networks:
+  kqa-ts-net:
+    external: true
+
+volumes:
+  kqa_ts_qdrant_data:
+    external: true
