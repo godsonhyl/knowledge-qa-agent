@@ -1,3 +1,4 @@
+import { Slider, Switch, InputNumber, Button } from 'tdesign-react';
 import { useEffect, useState } from 'react';
 import { useConfigStore } from '../stores/config.js';
 import { useKbStore } from '../stores/kb.js';
@@ -8,9 +9,11 @@ export function SettingsModal() {
   const sensitivity = useConfigStore((s) => s.sensitivity);
   const topK = useConfigStore((s) => s.topK);
   const temperature = useConfigStore((s) => s.temperature);
+  const fallbackOnNoEvidence = useConfigStore((s) => s.fallbackOnNoEvidence);
   const setSensitivity = useConfigStore((s) => s.setSensitivity);
   const setTopK = useConfigStore((s) => s.setTopK);
   const setTemperature = useConfigStore((s) => s.setTemperature);
+  const setFallbackOnNoEvidence = useConfigStore((s) => s.setFallbackOnNoEvidence);
 
   useEffect(() => {
     function onOpen() { setOpen(true); }
@@ -31,7 +34,7 @@ export function SettingsModal() {
           <button className="icon-btn" onClick={() => setOpen(false)}>✕</button>
         </div>
         <div className="modal-body">
-          <div className="notice notice-info">
+          <div className="notice notice-info settings-model-note">
             模型接入已由服务端统一配置：{config?.ready
               ? `${config.model} @ ${config.baseUrlHost}（密钥在服务端，不下发浏览器）`
               : '未配置（仅检索模式可用）'}
@@ -39,43 +42,47 @@ export function SettingsModal() {
           <label className="field">
             <span className="field-label">检索灵敏度<span className="field-tip">调高更容易判定为「有依据」，调低更严格</span></span>
             <div className="slider-row">
-              <input
-                type="range"
+              <Slider
                 min={0}
                 max={100}
                 step={5}
                 value={sensitivity}
-                onChange={(e) => setSensitivity(Number(e.target.value))}
+                onChange={(v: any) => setSensitivity(Number(v))}
               />
               <span className="slider-val">{sensText(sensitivity)}</span>
             </div>
           </label>
+          <label className="field field-switch">
+            <span className="field-label">无据时大模型兜底<span className="field-tip">检索无依据时让大模型用自身知识回答并醒目标注「非知识库依据」；关闭则纯拒答</span></span>
+            <Switch
+              value={fallbackOnNoEvidence}
+              onChange={(v: any) => setFallbackOnNoEvidence(!!v)}
+            />
+          </label>
           <div className="field-row">
             <label className="field">
               <span className="field-label">取用片段数</span>
-              <input
-                type="number"
+              <InputNumber
                 min={1}
                 max={12}
                 value={topK}
-                onChange={(e) => setTopK(Math.max(1, Math.min(12, Number(e.target.value) || 5)))}
+                onChange={(v: any) => setTopK(Math.max(1, Math.min(12, Number(v) || 8)))}
               />
             </label>
             <label className="field">
               <span className="field-label">温度</span>
-              <input
-                type="number"
+              <InputNumber
                 step={0.1}
                 min={0}
                 max={2}
                 value={temperature}
-                onChange={(e) => setTemperature(Number(e.target.value) || 0.2)}
+                onChange={(v: any) => setTemperature(Number(v) || 0.2)}
               />
             </label>
           </div>
         </div>
         <div className="modal-foot">
-          <button className="btn btn-ghost" onClick={() => setOpen(false)}>关闭</button>
+          <Button variant="outline" onClick={() => setOpen(false)}>关闭</Button>
         </div>
       </div>
     </div>

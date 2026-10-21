@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
+import { Switch, Button, Tag } from 'tdesign-react';
+import { SunnyIcon, MoonIcon, ChatIcon, FileIcon, MapInformationIcon as MapIcon, TipsIcon } from 'tdesign-icons-react';
 import { useChatStore, type ChatMessage } from '../stores/chat.js';
 import { useConfigStore } from '../stores/config.js';
 import { useKbStore } from '../stores/kb.js';
+import { useCiteStore } from '../stores/cite.js';
+import { useThemeStore, type ThemeMode } from '../stores/theme.js';
 import { REASON_TEXT } from '../qaPrompt.js';
 import { EvidenceCard } from './EvidenceCard.js';
 import { RichText } from './RichText.js';
@@ -41,15 +45,16 @@ export function ChatView() {
       <header className="topbar">
         <div className="topbar-title">新对话</div>
         <div className="topbar-actions">
+          <ThemeToggle />
           <label className="switch" title="只做检索、不调用大模型">
-            <input
-              type="checkbox"
-              checked={retrievalOnly}
-              onChange={(e) => setRetrievalOnly(e.target.checked)}
+            <Switch
+              size="small"
+              value={retrievalOnly}
+              onChange={(v: any) => setRetrievalOnly(!!v)}
             />
             <span className="switch-text">仅检索模式</span>
           </label>
-          <button className="btn btn-sm btn-ghost" onClick={newChat}>新对话</button>
+          <Button variant="outline" size="small" onClick={newChat}>新对话</Button>
         </div>
       </header>
 
@@ -82,17 +87,37 @@ export function ChatView() {
             }}
           ></textarea>
           <div className="composer-actions">
-            {streaming && <button className="btn btn-ghost btn-sm" onClick={stop}>停止</button>}
-            <button
-              className="btn btn-primary btn-sm"
+            {streaming && <Button variant="text" size="small" onClick={stop}>停止</Button>}
+            <Button
+              theme="primary"
+              size="small"
               disabled={streaming || !input.trim()}
               onClick={submit}
-            >提问</button>
+            >提问</Button>
           </div>
         </div>
         <p className="disclaimer">回答由大模型基于检索片段生成，可能存在误差；请以引用原文为准。</p>
       </div>
     </main>
+  );
+}
+
+function ThemeToggle() {
+  const mode = useThemeStore((s) => s.mode);
+  const setMode = useThemeStore((s) => s.setMode);
+  // 三态循环：system → light → dark → system
+  const next: ThemeMode = mode === 'system' ? 'light' : mode === 'light' ? 'dark' : 'system';
+  const label = mode === 'system' ? '跟随系统' : mode === 'light' ? '浅色' : '暗色';
+  const Icon = mode === 'dark' ? MoonIcon : SunnyIcon;
+  return (
+    <button
+      className="icon-btn"
+      title={`主题：${label}（点击切换）`}
+      onClick={() => setMode(next)}
+      style={{ width: 28, height: 28, border: '1px solid var(--border)' }}
+    >
+      <Icon />
+    </button>
   );
 }
 
@@ -104,8 +129,22 @@ function Welcome() {
       <p>
         提问后我会先在知识库里检索片段，再让大模型<b>仅基于检索到的原文</b>作答。<br />
         每个结论都会标出引用编号，点击可定位到原文位置。<br />
-        <b>检索不到依据时，我会直接说「没查到」，不会靠模型记忆作答。</b>
+        <b>检索不到依据时，会明确标注后由大模型基于自身知识兜底回答，不会伪装成有据可循。</b>
       </p>
+      <div className="welcome-tips">
+        <div className="tip">
+          <ChatIcon /><b>有据可循</b>每个结论旁的 [n] 角标对应可定位的原文片段
+        </div>
+        <div className="tip">
+          <FileIcon /><b>混合检索</b>BM25 词法 + bge-m3 向量双通道，RRF 融合
+        </div>
+        <div className="tip">
+          <MapIcon /><b>原文定位</b>点击角标或证据卡，跳转到原文行高亮
+        </div>
+        <div className="tip">
+          <TipsIcon /><b>拒答不伪装</b>无依据时明确拒答或醒目标注兜底
+        </div>
+      </div>
     </div>
   );
 }
@@ -117,26 +156,38 @@ function Message({ msg, config }: { msg: ChatMessage; config: ConfigResp | null 
 
   const search = msg.search;
   const noEvidence = !!search && !search.hasEvidence;
+  const fallbackAnswered = noEvidence && !!msg.text && !!msg.fallback;
   const retrievalOnlyHit = !!search && search.hasEvidence && !msg.text;
 
   return (
     <div className="msg msg-bot">
       <div className="bubble">
         <div className="bubble-head">
-          {noEvidence && <span className="badge miss">未检索到依据</span>}
-          {retrievalOnlyHit && <span className="badge ok">已找到 {msg.hits?.length || 0} 条依据</span>}
-          {msg.text && <span className="badge ok">已回答</span>}
-          {msg.streaming && <span className="badge">生成中</span>}
-          {msg.aborted && <span className="badge warn">已中断</span>}
+          {noEvidence && !fallbackAnswered && <Tag theme="danger" variant="light" size="small">未检索到依据</Tag>}
+          {fallbackAnswered && <Tag theme="warning" variant="light" size="small">未检索到依据 · 模型兜底</Tag>}
+          {retrievalOnlyHit && <Tag theme="success" variant="light" size="small">已找到 {msg.hits?.length || 0} 条依据</Tag>}
+          {msg.text && !noEvidence && <Tag theme="success" variant="light" size="small">已回答</Tag>}
+          {msg.streaming && (
+            <span className="badge plain" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <span className="pulse-indicator"><span className="indicator-dot"></span><span className="indicator-ring"></span></span>
+              生成中
+            </span>
+          )}
+          {msg.aborted && <Tag theme="warning" variant="light" size="small">已中断</Tag>}
         </div>
         <div className="answer">
-          {noEvidence && <NoEvidence msg={msg} config={config} />}
+          {fallbackAnswered && (
+            <div className="notice notice-warn">
+              <b>知识库里没有找到相关内容。</b>以下是模型基于自身知识给出的回答，未有原文依据，请谨慎参考。
+            </div>
+          )}
+          {noEvidence && !fallbackAnswered && <NoEvidence msg={msg} config={config} />}
           {retrievalOnlyHit && (
             <div className="notice notice-info">
               <b>仅检索模式</b>：未调用大模型，以下为命中片段。
             </div>
           )}
-          {msg.text !== undefined && msg.text !== '' && (
+          {msg.text !== undefined && msg.text !== '' && !fallbackAnswered && (
             msg.used && msg.used.size === 0
               ? (
                 <div className="notice notice-warn">
@@ -149,10 +200,15 @@ function Message({ msg, config }: { msg: ChatMessage; config: ConfigResp | null 
             <RichText
               text={msg.text}
               hitCount={msg.hits?.length || 0}
-              onCite={() => {
+              streaming={msg.streaming}
+              onCite={(n) => {
+                useCiteStore.getState().focus(n);
                 document.querySelector('.ev-wrap')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
               }}
             />
+          )}
+          {msg.text && !msg.streaming && !msg.aborted && (
+            <AnswerActions msg={msg} />
           )}
           {msg.aborted && !msg.text && (
             <div className="notice notice-warn">回答被中断，可重新提问。</div>
@@ -180,6 +236,37 @@ function EvidenceList({ msg }: { msg: ChatMessage }) {
       {!collapsed && msg.hits!.map((h, i) => (
         <EvidenceCard key={h.chunkId} no={i + 1} hit={h} defaultOpen={i === 0} />
       ))}
+    </div>
+  );
+}
+
+function AnswerActions({ msg }: { msg: ChatMessage }) {
+  const ask = useChatStore((s) => s.ask);
+  const [copied, setCopied] = useState(false);
+  const [reneging, setReneging] = useState(false);
+
+  function copy() {
+    const text = msg.text || '';
+    navigator.clipboard?.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    }).catch(() => {});
+  }
+
+  function regen() {
+    if (reneging || useChatStore.getState().streaming) return;
+    setReneging(true);
+    void ask(msg.question || '').finally(() => setReneging(false));
+  }
+
+  return (
+    <div className="answer-actions">
+      <button className="aa-btn" onClick={copy} title="复制回答（含引用标记）">
+        {copied ? '✓ 已复制' : '复制'}
+      </button>
+      <button className="aa-btn" onClick={regen} disabled={reneging} title="用同样问题重新检索并作答">
+        {reneging ? '生成中…' : '重新生成'}
+      </button>
     </div>
   );
 }

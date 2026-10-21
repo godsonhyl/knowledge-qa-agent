@@ -36,6 +36,10 @@ export interface Env {
   CONFLUENCE_PAT: string;
   CONFLUENCE_INSECURE_TLS: boolean;
   CONFLUENCE_MAX_PAGES: number;
+
+  /** 清空知识库的管理员令牌。未设置 → 清空功能完全禁用（按钮隐藏、API 403）。
+   *  设置后请求需带 X-Admin-Token 头（UI 侧有登录入口）。 */
+  ADMIN_TOKEN: string;
 }
 
 export const ENV: Env = {
@@ -62,6 +66,8 @@ export const ENV: Env = {
   CONFLUENCE_PAT: process.env.CONFLUENCE_PAT || '',
   CONFLUENCE_INSECURE_TLS: bool(process.env.CONFLUENCE_INSECURE_TLS, false),
   CONFLUENCE_MAX_PAGES: int(process.env.CONFLUENCE_MAX_PAGES, 200),
+
+  ADMIN_TOKEN: process.env.ADMIN_TOKEN || '',
 };
 
 export function llmReady(): boolean {
@@ -90,6 +96,8 @@ export function configResp() {
     model: ENV.LLM_MODEL,
     confluence: confluenceReady(),
     embed: embedReady(),
+    /** 清空功能是否启用：只有配置了 ADMIN_TOKEN 才允许 */
+    clearEnabled: Boolean(ENV.ADMIN_TOKEN),
   };
 }
 

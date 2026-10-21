@@ -8,3 +8,5 @@ coverage/
 .DS_Store
 *.local
 selftest-report.txt
+backups/
+pnpm-lock.yaml

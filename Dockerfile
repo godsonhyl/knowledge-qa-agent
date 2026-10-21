@@ -25,6 +25,10 @@ COPY sslcert ./sslcert
 # sslcert 由构建装入；确保 node 用户可读（key.pem 原为 root 600）
 RUN chown -R node:node /app/sslcert && chmod 600 /app/sslcert/key.pem || true
 
+# 备份目录：清空前自动导出快照。挂载宿目录覆盖即可持久化。
+RUN mkdir -p /app/backups && chown -R node:node /app/backups
+ENV BACKUP_DIR=/app/backups
+
 USER node
 EXPOSE 3000
 CMD ["node", "dist/server/index.js"]

@@ -33,6 +33,9 @@ services:
       CONFLUENCE_PAT: "${CONFLUENCE_PAT:-}"
       CONFLUENCE_INSECURE_TLS: "${CONFLUENCE_INSECURE_TLS:-0}"
       CONFLUENCE_MAX_PAGES: "${CONFLUENCE_MAX_PAGES:-200}"
+      # ---- 管理员令牌（设了才允许清空知识库）----
+      ADMIN_TOKEN: "${ADMIN_TOKEN:-}"
+      BACKUP_DIR: "/app/backups"
       # ---- 可选：自签 HTTPS（解锁浏览器安全上下文）----
       GEN_CERT: "${GEN_CERT:-0}"
       HTTPS_PORT: "${HTTPS_PORT:-3443}"
@@ -40,6 +43,9 @@ services:
       - kqa-ts-net
     depends_on:
       - qdrant
+    volumes:
+      # 清空前自动导出的 JSON 快照持久化到宿机（误清后可恢复）
+      - ./backups:/app/backups
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/config').then(r=>process.exit(r.status===200?0:1)).catch(()=>process.exit(1))"]
       interval: 30s

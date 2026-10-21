@@ -88,6 +88,8 @@ export interface ConfigResp {
   model: string;
   confluence: boolean;
   embed: boolean;
+  /** 清空功能是否启用（服务端配置了 ADMIN_TOKEN 才为 true） */
+  clearEnabled: boolean;
 }
 
 export interface ImportResult {

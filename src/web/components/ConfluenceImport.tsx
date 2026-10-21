@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Button, Input } from 'tdesign-react';
 import { useKbStore } from '../stores/kb.js';
 import { useConfigStore } from '../stores/config.js';
 
@@ -16,18 +17,16 @@ export function ConfluenceImport() {
 
   return (
     <div className="paste-box conf-box-wrap">
-      <input
-        type="text"
+      <Input
         value={url}
+        clearable
         placeholder="Confluence 页面链接，如 https://wiki/pages/viewpage.action?pageId=123"
-        onChange={(e) => setUrl(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && !e.nativeEvent.isComposing) onImport(false);
-        }}
+        onChange={(v: any) => setUrl(v ?? '')}
+        onEnter={() => onImport(false)}
       />
       <div className="conf-btns">
-        <button className="btn btn-sm btn-ghost" disabled={loading} onClick={() => onImport(false)}>导入页面</button>
-        <button className="btn btn-sm btn-ghost" disabled={loading} onClick={() => onImport(true)}>导入子树</button>
+        <Button variant="outline" size="small" disabled={loading} onClick={() => onImport(false)}>导入页面</Button>
+        <Button variant="outline" size="small" disabled={loading} onClick={() => onImport(true)}>导入子树</Button>
       </div>
       <div className="dir-hint">
         「导入页面」只抓这一页；「导入子树」抓该页及全部子孙（上限 200 页）。

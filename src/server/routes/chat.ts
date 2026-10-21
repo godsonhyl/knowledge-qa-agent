@@ -32,7 +32,8 @@ chat.post('/', async (c) => {
     model: payload.model || ENV.LLM_MODEL,
     messages,
     stream: true,
-    temperature: typeof payload.temperature === 'number' ? payload.temperature : 0.2,
+    // 有据可循是硬约束（只用片段、必须引用），采样温度只影响表达，可以放松
+    temperature: typeof payload.temperature === 'number' ? payload.temperature : 0.7,
   };
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };

@@ -23,7 +23,7 @@ export async function hybridSearch(
   retriever: Retriever,
   opts: { topK?: number; sensitivity?: number },
 ): Promise<SearchResult> {
-  const topK = opts.topK || 5;
+  const topK = opts.topK || 8;
   const sensitivity = typeof opts.sensitivity === 'number' ? opts.sensitivity : 50;
   const started = Date.now();
 

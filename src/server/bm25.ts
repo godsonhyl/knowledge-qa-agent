@@ -147,7 +147,10 @@ export class BM25Index {
     for (const chunk of chunks) {
       // 索引用全量 token（含 unigram，保证召回）。
       // 若该块已蒸馏出知识点，把知识点拼进来一起索引——概念词也能被命中。
-      const textForIndex = chunk.summary ? `${chunk.text}\n${chunk.summary}` : chunk.text;
+      // 文档名也拼进索引：文档名常含关键术语（如「TL-衍生品交易系统-准备上线评估」），
+      // 不拼进来则按正文匹配会漏掉文档名线索，宽泛问题召回质量差。
+      const docName = chunk.docName ? `${chunk.docName}\n` : '';
+      const textForIndex = `${docName}${chunk.text}${chunk.summary ? '\n' + chunk.summary : ''}`;
       const tokens = tokenize(textForIndex);
       const tf = new Map<string, number>();
       for (const t of tokens) tf.set(t, (tf.get(t) || 0) + 1);

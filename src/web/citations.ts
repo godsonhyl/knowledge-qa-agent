@@ -3,6 +3,7 @@
    ============================================================ */
 import type { ReactNode } from 'react';
 import { createElement } from 'react';
+import { useCiteStore } from './stores/cite.js';
 
 export interface CitationValidation {
   used: Set<number>;
@@ -20,12 +21,16 @@ export function validateCitations(text: string, hitCount: number): CitationValid
   return { used };
 }
 
-/** 把 [n] 渲染成可点击角标（超出范围则保留字面文本）。React 自动转义，无 XSS。 */
+/** 把 [n] 渲染成可点击角标（超出范围则保留字面文本）。React 自动转义，无 XSS。
+ *  hoverNo 非空时（证据卡悬停中），同号角标加 hl 类高亮。
+ *  角标自身悬停也会反向高亮证据卡（写入 citeStore.hoverNo）。 */
 export function renderInlineCitations(
   text: string,
   hitCount: number,
   onClick: (n: number) => void,
+  hoverNo: number | null = null,
 ): ReactNode {
+  const setHover = useCiteStore.getState().setHover;
   const parts: ReactNode[] = [];
   const re = /\[(\d{1,2})\]/g;
   let last = 0;
@@ -37,9 +42,11 @@ export function renderInlineCitations(
       parts.push(
         createElement('button', {
           key: `c${m.index}`,
-          className: 'cite',
+          className: `cite${hoverNo === n ? ' hl' : ''}`,
           'data-no': String(n),
           onClick: () => onClick(n),
+          onMouseEnter: () => setHover(n),
+          onMouseLeave: () => setHover(null),
           title: `查看依据 ${n}`,
         }, n),
       );

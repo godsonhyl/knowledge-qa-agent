@@ -11,12 +11,29 @@ export interface ToastMsg {
   type: '' | 'ok' | 'err';
 }
 
+/** 后台批量蒸馏进度（服务端 /api/kb/distill-status 轮询） */
+export interface DistillJobView {
+  running: boolean;
+  startedAt: number | null;
+  finishedAt: number | null;
+  total: number;
+  done: number;
+  skipped: number;
+  failed: number;
+  current: string | null;
+  lastError: string | null;
+  aborted: boolean;
+}
+
 interface KbState {
   docs: DocMeta[];
   stats: KbStats | null;
   loading: boolean;
   distill: { docId: string; done: number; total: number } | null;
   distillAbort: AbortController | null;
+  /** 后台批量蒸馏任务进度 + 轮询定时器 */
+  distillJob: DistillJobView | null;
+  pollTimer: ReturnType<typeof setInterval> | null;
   toasts: ToastMsg[];
   refresh: () => Promise<void>;
   toast: (text: string, type?: '' | 'ok' | 'err') => void;
@@ -24,12 +41,18 @@ interface KbState {
   addDoc: (name: string, text: string, source: string) => Promise<boolean>;
   importFiles: (files: { name: string; text: string }[]) => Promise<void>;
   importDir: (files: { name: string; text: string }[]) => Promise<void>;
+  /** PDF（二进制）走 multipart 上传，服务端 unpdf 解析 */
+  uploadPdf: (file: File) => Promise<boolean>;
+  uploadPdfs: (files: File[]) => Promise<void>;
   importConfluence: (url: string, recursive: boolean) => Promise<void>;
   loadSeed: () => Promise<void>;
   removeDoc: (docId: string) => Promise<void>;
   clearAll: () => Promise<void>;
   startDistill: (docId: string) => Promise<void>;
   stopDistill: () => void;
+  startDistillAll: () => Promise<void>;
+  stopDistillAll: () => Promise<void>;
+  pollDistillJob: () => void;
 }
 
 const LOCAL_EXTS = new Set(['.txt', '.md', '.csv']);
@@ -63,6 +86,8 @@ export const useKbStore = create<KbState>((set, get): KbState => ({
   loading: false,
   distill: null,
   distillAbort: null,
+  distillJob: null,
+  pollTimer: null,
   toasts: [],
 
   refresh: async () => {
@@ -125,6 +150,38 @@ export const useKbStore = create<KbState>((set, get): KbState => ({
     await get().refresh();
   },
 
+  /** 单篇 PDF 上传：multipart → 服务端 unpdf 解析 → 复用 addDoc 链路 */
+  uploadPdf: async (file) => {
+    const MAX = 500 * 1024 * 1024;
+    if (file.size > MAX) {
+      get().toast(`「${file.name}」超过 500MB 上限（${(file.size / 1024 / 1024).toFixed(0)}MB）`, 'err');
+      return false;
+    }
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('source', 'file');
+    const res = await fetch('/api/kb/docs/upload', { method: 'POST', body: fd });
+    let data: any = null;
+    try { data = await res.json(); } catch { /* empty */ }
+    if (res.ok) return true;
+    if (res.status === 409) get().toast(`已跳过重复文档：${file.name}`);
+    else if (res.status === 413) get().toast(`「${file.name}」超过 500MB 上限`, 'err');
+    else if (res.status === 422) get().toast(`「${file.name}」：${data?.error || 'PDF 解析失败'}`, 'err');
+    else get().toast(`「${file.name}」导入失败：${data?.error || res.status}`, 'err');
+    return false;
+  },
+
+  uploadPdfs: async (files) => {
+    if (!files.length) return;
+    let ok = 0;
+    for (const f of files) {
+      get().toast(`正在上传并解析：${f.name}`);
+      if (await get().uploadPdf(f)) ok++;
+    }
+    if (ok) get().toast(`已导入 ${ok} 篇 PDF`, 'ok');
+    await get().refresh();
+  },
+
   importConfluence: async (url, recursive) => {
     get().toast(recursive ? '抓取子树中…' : '抓取中…');
     const r = await api<{ pages?: { name: string; text: string }[]; text?: string; title?: string; skipped?: unknown[]; truncated?: boolean; error?: string }>('/api/confluence-page', {
@@ -171,13 +228,44 @@ export const useKbStore = create<KbState>((set, get): KbState => ({
   },
 
   removeDoc: async (docId) => {
-    await api(`/api/kb/docs/${docId}`, { method: 'DELETE' });
+    // 删除单篇也需要管理员令牌（与清空同款校验）
+    let adminToken = sessionStorage.getItem('kqa.adminToken') || '';
+    if (!adminToken) {
+      const tok = window.prompt('删除文档需要管理员令牌。请输入 ADMIN_TOKEN：');
+      if (!tok) return;
+      adminToken = tok.trim();
+      sessionStorage.setItem('kqa.adminToken', adminToken);
+    }
+    const r = await api(`/api/kb/docs/${docId}`, {
+      method: 'DELETE',
+      headers: { 'X-Admin-Token': adminToken },
+    });
+    if (!r.ok) {
+      if (r.status === 403) {
+        sessionStorage.removeItem('kqa.adminToken');
+        const msg = (r.data && typeof r.data === 'object' && 'error' in r.data) ? String((r.data as { error: string }).error) : '管理员令牌错误，请重试';
+        get().toast(msg, 'err');
+      } else {
+        get().toast('删除失败', 'err');
+      }
+      return;
+    }
     get().toast('已删除', 'ok');
     await get().refresh();
   },
 
   clearAll: async () => {
-    await api('/api/kb/docs', { method: 'DELETE' });
+    // 清空需要管理员令牌：服务端未启用则提示
+    const adminToken = sessionStorage.getItem('kqa.adminToken') || '';
+    const r = await api('/api/kb/docs', {
+      method: 'DELETE',
+      headers: adminToken ? { 'X-Admin-Token': adminToken } : undefined,
+    });
+    if (!r.ok) {
+      const detail = r.status === 403 ? (adminToken ? '管理员令牌错误' : '清空功能未启用：需管理员令牌') : '清空失败';
+      get().toast(detail, 'err');
+      return;
+    }
     get().toast('知识库已清空', 'ok');
     await get().refresh();
   },
@@ -215,6 +303,63 @@ export const useKbStore = create<KbState>((set, get): KbState => ({
   },
   stopDistill: () => {
     get().distillAbort?.abort();
+  },
+
+  startDistillAll: async () => {
+    let adminToken = sessionStorage.getItem('kqa.adminToken') || '';
+    // 没录过令牌 → 弹框录入（与清空按钮同款逻辑）
+    if (!adminToken) {
+      const tok = window.prompt('批量蒸馏全库需要管理员令牌。请输入 ADMIN_TOKEN：');
+      if (!tok) return;
+      adminToken = tok.trim();
+      sessionStorage.setItem('kqa.adminToken', adminToken);
+    }
+    const r = await api<{ ok: boolean; error?: string }>('/api/kb/distill-all', {
+      method: 'POST',
+      headers: { 'X-Admin-Token': adminToken },
+    });
+    if (!r.ok) {
+      // 令牌错误则清掉本地记录，下次重输
+      if (r.status === 403) sessionStorage.removeItem('kqa.adminToken');
+      const detail = r.status === 403 ? '管理员令牌错误，请重试' : r.data?.error || '启动失败';
+      get().toast(detail, 'err');
+      return;
+    }
+    get().toast('已启动后台批量蒸馏', 'ok');
+    get().pollDistillJob();
+  },
+
+  stopDistillAll: async () => {
+    const adminToken = sessionStorage.getItem('kqa.adminToken') || '';
+    await api('/api/kb/distill-stop', { method: 'POST', headers: { 'X-Admin-Token': adminToken } });
+    get().toast('已发送停止信号，处理完当前块后退出', '');
+  },
+
+  pollDistillJob: () => {
+    // 避免重复起轮询
+    if (get().pollTimer) return;
+    const timer = setInterval(async () => {
+      try {
+        const r = await api<DistillJobView>('/api/kb/distill-status');
+        if (r.ok) {
+          set({ distillJob: r.data });
+          // 任务结束（running 变 false）后，刷新文档列表的蒸馏计数、停止轮询
+          if (!r.data.running) {
+            clearInterval(get().pollTimer!);
+            set({ pollTimer: null });
+            await get().refresh();
+            const j = r.data;
+            const msg = j.aborted
+              ? `批量蒸馏已中断：成功 ${j.done}，跳过 ${j.skipped}，失败 ${j.failed}`
+              : `批量蒸馏完成：成功 ${j.done}，跳过 ${j.skipped}，失败 ${j.failed}`;
+            get().toast(msg, j.failed ? 'err' : 'ok');
+          }
+        }
+      } catch {
+        // 网络抖动，继续轮询
+      }
+    }, 2000);
+    set({ pollTimer: timer });
   },
 }));
 

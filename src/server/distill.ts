@@ -40,7 +40,7 @@ export async function distillChunkInto(docId: string, index: number, chunk: Chun
 
   const updated = await setChunkSummary(docId, index, summary);
   if (!updated) throw new Error('写入知识点失败');
-  kbIndex.updateChunk(chunkIdFor(docId, index), chunk.text, summary);
+  kbIndex.updateChunk(chunkIdFor(docId, index), chunk.text, summary, chunk.docName);
   return summary;
 }
 

@@ -38,7 +38,7 @@ export class Retriever {
   }
 
   search(query: string, opts: { topK?: number; sensitivity?: number } = {}): LexResult {
-    const topK = opts.topK || 5;
+    const topK = opts.topK || 8;
     const sensitivity = typeof opts.sensitivity === 'number' ? opts.sensitivity : 50;
 
     if (!this.index || this.index.N === 0) {

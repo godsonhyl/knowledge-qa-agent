@@ -37,7 +37,6 @@ export function ViewerModal() {
 
   useEffect(() => {
     if (state.open && state.startLine) {
-      // 自动滚动到高亮区
       setTimeout(() => {
         const el = document.querySelector('.doc-viewer .hl');
         el?.scrollIntoView({ block: 'center' });

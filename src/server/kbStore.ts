@@ -123,6 +123,38 @@ export async function bulkAddDocs(docs: { name: string; text: string; source: Do
   return { added, failed };
 }
 
+/**
+ * 批量恢复：从快照导入，**已有蒸馏知识点一并写回**，省一轮 LLM 蒸馏调用。
+ * 返回 {added, failed, summariesRestored}。同 bulkAddDocs 一样去重（重名跳过并记 failed）。
+ */
+export async function restoreFromBackup(entries: { name: string; text: string; source: DocSource; summaries: (string | null)[] }[]): Promise<{ added: number; failed: { name: string; reason: string }[]; summariesRestored: number }> {
+  const failed: { name: string; reason: string }[] = [];
+  let added = 0;
+  let summariesRestored = 0;
+  for (const d of entries) {
+    try {
+      // addDoc 已处理重复，直接报 409 给下面的 catch
+      const imp = await addDoc(d.name, d.text, d.source);
+      added++;
+      // 写回蒸馏的知识点（addDoc 创建的块按 0..N 顺序，与快照 summaries 对齐）
+      if (Array.isArray(d.summaries) && d.summaries.length) {
+        let restored = 0;
+        for (let i = 0; i < d.summaries.length; i++) {
+          const s = d.summaries[i];
+          if (s && String(s).trim()) {
+            const updated = await setChunkSummary(imp.docId, i, s);
+            if (updated) restored++;
+          }
+        }
+        summariesRestored += restored;
+      }
+    } catch (err) {
+      failed.push({ name: d.name, reason: err instanceof KbError ? err.message : String((err as Error)?.message || err) });
+    }
+  }
+  return { added, failed, summariesRestored };
+}
+
 /** 文档列表（payload 投影排除 text） */
 export async function listDocs(): Promise<DocMeta[]> {
   const docs = await scrollAll<DocPayload>(
@@ -172,6 +204,26 @@ export async function clearAll(): Promise<void> {
   await dropCollection(COLLECTION_DOCS);
   payloadIndexEnsured = false;
   await ensureCollections();
+}
+
+/**
+ * 导出全库为备份条目列表：每篇文档取全文 + 每块的蒸馏知识点。
+ * 清空前调用此函数写出 JSON 快照；恢复时直接把 summary 写回，省一轮 LLM 调用。
+ */
+export async function exportForBackup(): Promise<{ name: string; text: string; source: string; summaries: (string | null)[] }[]> {
+  const docs = await scrollAll<DocPayload>(COLLECTION_DOCS, null);
+  const out: { name: string; text: string; source: string; summaries: (string | null)[] }[] = [];
+  for (const d of docs) {
+    const chunks = await scrollAll<ChunkPayload>(COLLECTION_CHUNKS, { must: [{ key: 'docId', match: { value: d.id } }] });
+    chunks.sort((a, b) => a.payload.index - b.payload.index);
+    out.push({
+      name: d.payload.name,
+      text: d.payload.text,
+      source: d.payload.source,
+      summaries: chunks.map((c) => c.payload.summary),
+    });
+  }
+  return out;
 }
 
 export async function listChunks(docId: string): Promise<ChunkPayload[] | null> {

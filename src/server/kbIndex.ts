@@ -46,16 +46,18 @@ export class KbIndex {
   }
 
   /** 蒸馏后单块更新（不整库重建） */
-  updateChunk(chunkId: string, text: string, summary: string | null): void {
+  updateChunk(chunkId: string, text: string, summary: string | null, docName?: string): void {
     const idx = this.retriever.index;
     if (!idx) return;
     const i = idx.docs.findIndex((d) => d.chunk.chunkId === chunkId);
     if (i < 0) return;
-    const textForIndex = summary ? `${text}\n${summary}` : text;
+    // 与 build() 对齐：文档名 + 正文 + 知识点
+    const docNamePrefix = docName ? `${docName}\n` : '';
+    const textForIndex = `${docNamePrefix}${text}${summary ? '\n' + summary : ''}`;
     const tokens = tokenize(textForIndex);
     const tf = new Map<string, number>();
     for (const t of tokens) tf.set(t, (tf.get(t) || 0) + 1);
-    idx.docs[i] = { chunk: { chunkId, text, summary }, len: tokens.length || 1, tf };
+    idx.docs[i] = { chunk: { chunkId, text, summary, docName }, len: tokens.length || 1, tf };
   }
 }
 
