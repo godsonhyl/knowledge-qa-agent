@@ -238,6 +238,8 @@ docker logs -f kqa-ts-app
 
 ## 6. 核心数据模型与契约
 
+> 契约的完整、权威清单已抽取到 [CONTRACTS.md](./CONTRACTS.md)。本节保留数据模型与防幻觉契约的速览；改动任何阈值或引用规则前，先读 CONTRACTS.md。
+
 ### 6.1 Qdrant 双 collection
 
 ```jsonc

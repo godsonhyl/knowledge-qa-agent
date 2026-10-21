@@ -86,17 +86,24 @@ plain `fetch` 调 Qdrant REST（不引 SDK）。两个 collection：
 
 ## 测试即契约
 
+> 完整契约清单见 [CONTRACTS.md](./CONTRACTS.md)。本节只列测试文件与覆盖点。
+
 - `tests/chunker.test.ts`：§2 分块、§7 行号+字符偏移精度、§10 长正文 overlap、边界输入。
 - `tests/evidence.test.ts`：**§4（应命中 8 条）§5（应拒答 7 条）字面不变**——任何检索调优改动必须先跑过这两组。§6 拒答不泄露片段、§11 phrase-hit 回归、§12 蒸馏后语义近邻命中。
 - `tests/confluence.test.ts`：§11 Confluence URL 解析（4 种形式 + 拒绝）+ storage→纯文本 + 引用编号校验。
+- `tests/pdf.test.ts`：§PDF-1 可解析 PDF 提取原文；§PDF-2 无文字层抛 PdfNoTextError。
 - `scripts/e2e.mjs`：对运行中的 stack 跑种子导入 + §4/§5 + 引用偏移往返 + chat SSE 透传。
 
 ## 关键约束（不要破坏）
 
+> 完整契约与规范见 [CONTRACTS.md](./CONTRACTS.md)。以下是最常踩的硬约束。
+
+- **chunker/bm25/retriever 阈值不可改**——它们是 selftest 契约的具体形式（CONTRACTS §3）。
 - **零重编码 SSE**：chat 透传用 `new Response(upstream.body, ...)` + `X-Accel-Buffering: no`。
-- **chunker/bm25/retriever 阈值不可改**——它们是 selftest 契约的具体形式。
-- **Qdrant id 必须 UUID/uint**（UUIDv5 幂等）。
+- **Qdrant id 必须 UUID/uint**（UUIDv5 幂等）；响应包在 `{result:...}` 里，必须解构。
 - **distill 时服务端从 Qdrant 取块文**，绝不信任客户端传入的 text。
 - **localStorage 只存配置 + 对话**，知识库永远在 Qdrant。
 - **检索服务端化**：`POST /api/kb/search` 是唯一检索入口；前端不跑 BM25。
+- **引用独立呈现**（CONTRACTS §2.2）：表格用"来源"列，文字放句末，禁止贴在名词/数字/名称中间。
 - 服务端持有所有密钥；浏览器只看 `/api/config` 的 ready 标志。
+- **PDF 上传**：busboy 流式落盘，500MB 上限，扫描件 422（CONTRACTS §8）。

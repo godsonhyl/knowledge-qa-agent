@@ -4,6 +4,17 @@
 
 TS 重构版：**Hono + React + Qdrant**，知识库存服务端 Qdrant（无 localStorage 容量限制），检索为 **BM25 词法 + bge-m3 向量** 双通道混合（RRF 融合），防幻觉契约与原 JS 版完全一致。
 
+> v2.1（2026-10）：UI 按 TDesign 全量翻新（浅/暗双主题、代码块语法高亮）、新增 PDF 导入、回答规范升级为「企业内部知识问答 Agent 规范」（意图优先 / 最小充分 / 表格化 / 引用独立呈现）。详见 [CHANGELOG](#变更记录) 与 [CONTRACTS.md](./CONTRACTS.md)。
+
+## 文档导航
+
+| 文档 | 内容 |
+|---|---|
+| **README.md**（本文件） | 快速开始 / 架构速览 / 环境变量 / 导入方式 |
+| [CONTRACTS.md](./CONTRACTS.md) | **契约与规范**：防幻觉契约、检索阈值契约、引用规范、回答规范、不可改阈值清单 |
+| [DESIGN.md](./DESIGN.md) | 技术设计与运维：架构 / 技术栈 / 部署 / 运维 / 可观测 / 扩展点 / 数据模型 |
+| [CLAUDE.md](./CLAUDE.md) | Claude Code 工作指南：命令 / 关键约束 / 测试即契约 |
+
 ## 快速开始
 
 ```bash
@@ -71,10 +82,39 @@ docker compose
 ## 导入方式
 
 - **拖拽/点击/粘贴**：文本直传服务端（单篇 ≤ 5MB）
-- **选择本机目录**：浏览器 `showDirectoryPicker`（Chrome/Edge 86+，需 HTTPS 或 localhost——设 `GEN_CERT=1` 后走 3443）
+- **PDF 上传**：拖入 `.pdf` 走 `POST /api/kb/docs/upload`，服务端 `unpdf` 解析文本（单篇 ≤ 500MB；扫描/图片型 PDF 返回 422 明确提示）
+- **选择本机目录**：浏览器 `showDirectoryPicker`（Chrome/Edge 86+，需 HTTPS 或 localhost——设 `GEN_CERT=1` 后走 3443），目录内 `.txt/.md/.csv/.pdf` 批量导入
 - **Confluence 链接**：粘贴页面 URL，「导入页面」单页 /「导入子树」递归全部子孙
 - **程序化**：`POST /api/kb/docs/bulk`（≤50 篇/次）
 
 ## 从旧 JS 版迁移
 
 知识库不再存浏览器 localStorage——旧版数据需重新导入（Confluence 重导即可）。手动迁移一行命令：旧版 F12 Console 执行 `JSON.stringify(KB.docs)`，对每篇 `curl -X POST .../api/kb/docs -d '{"name":..,"text":..}'`。
+
+## 变更记录
+
+### v2.1（2026-10）
+
+**UI 全量翻新（参照 WeKnora / TDesign）**
+- 引入 `tdesign-react` + `highlight.js`，暗色模式三态切换（系统/浅/暗，顶栏按钮）
+- 回答代码块：深色底 + 语言标签 + 复制按钮 + 11 种语言语法高亮
+- 证据卡、欢迎页、弹层、原文查看器全部 token 化
+
+**PDF 导入**
+- `POST /api/kb/docs/upload`：`busboy` 流式落盘（500MB 上限）+ `unpdf` 文本提取
+- 扫描/图片型 PDF 返回 422；拖拽/目录导入接受 `.pdf`
+- 新增 `tests/pdf.test.ts`（2 用例），总 44 vitest 全绿
+
+**回答规范升级**
+- `SYSTEM_PROMPT` 切换为《企业内部知识问答 Agent — 回答规范》
+- 意图优先 / 最小充分 / 信息去重合并 / 版本管理 / 结构化表格展示
+- `[n]` 引用独立呈现：表格用"来源"列，文字放句末，不嵌在名词/数字中间
+- 详见 [CONTRACTS.md §4 回答规范](./CONTRACTS.md#4-回答规范)
+
+**基础设施**
+- `package.json` 补全真实 `dependencies`（原 lock 无对应声明）
+- `.gitignore` 排除 `backups/`（运行时快照）、`pnpm-lock.yaml`
+
+### v2.0.0
+
+TS 重构版首发：Hono + React + Qdrant 混合检索的可溯源问答 Agent。
