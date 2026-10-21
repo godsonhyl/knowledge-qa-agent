@@ -88,8 +88,23 @@ export interface ConfigResp {
   model: string;
   confluence: boolean;
   embed: boolean;
+  /** 联网搜索兜底是否可用（服务端配置了 SEARXNG_URL 才为 true） */
+  webSearch: boolean;
   /** 清空功能是否启用（服务端配置了 ADMIN_TOKEN 才为 true） */
   clearEnabled: boolean;
+}
+
+/** POST /api/web-search 返回的联网命中条目（SearXNG 裁剪后） */
+export interface WebHit {
+  title: string;
+  url: string;
+  content: string;
+}
+
+export interface WebSearchResult {
+  hits: WebHit[];
+  unresponsiveEngines: string[];
+  empty: boolean;
 }
 
 export interface ImportResult {

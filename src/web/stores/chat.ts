@@ -2,8 +2,8 @@
    web/stores/chat.ts —— 对话状态（SSE 流式 + 引用校验 + localStorage）
    ============================================================ */
 import { create } from 'zustand';
-import type { SearchResult, Hit } from '@shared/types.js';
-import { SYSTEM_PROMPT, FALLBACK_SYSTEM_PROMPT, REASON_TEXT } from '../qaPrompt.js';
+import type { SearchResult, Hit, WebSearchResult } from '@shared/types.js';
+import { SYSTEM_PROMPT, FALLBACK_SYSTEM_PROMPT, WEB_SEARCH_SYSTEM_PROMPT, REASON_TEXT } from '../qaPrompt.js';
 import { validateCitations } from '../citations.js';
 
 export interface ChatMessage {
@@ -21,6 +21,11 @@ export interface ChatMessage {
   modelNote?: string;     // 拒答后"让模型补充说明"的文本
   /** 无据兜底：模型自身知识回答，非知识库依据 */
   fallback?: boolean;
+  /** 联网搜索兜底：SearXNG 命中喂 LLM 的回答，非知识库依据 */
+  webAnswer?: boolean;
+  /** 联网搜索命中的来源（title+url，UI 展示） */
+  webHits?: { title: string; url: string; content: string }[];
+  webSearching?: boolean;
 }
 
 interface ChatState {
@@ -31,6 +36,8 @@ interface ChatState {
   stop: () => void;
   newChat: () => void;
   requestModelNote: (msgId: number) => Promise<void>;
+  /** 联网搜索兜底：拒答后用户主动触发，SearXNG → LLM → 标注非知识库依据 */
+  webSearchAnswer: (msgId: number) => Promise<void>;
   restore: () => void;
 }
 
@@ -279,6 +286,68 @@ export const useChatStore = create<ChatState>((set, get) => ({
         messages: s.messages.map((m) => m.id === msgId2 ? { ...m, modelNote: `⚠️ ${e?.message || e}` } : m),
       }));
     }
+  },
+
+  /** 联网搜索兜底：拒答后用户主动触发。
+   *  SearXNG 命中 → 喂 LLM 作答 → 明确标注「非知识库依据」。
+   *  与知识库链路完全隔离：不进 Qdrant、不进 BM25、不伪装有据。 */
+  webSearchAnswer: async (msgId2) => {
+    const msg = get().messages.find((m) => m.id === msgId2);
+    if (!msg || !msg.question || msg.webSearching) return;
+    set((s) => ({
+      messages: s.messages.map((m) => m.id === msgId2 ? { ...m, webSearching: true } : m),
+    }));
+    try {
+      // 1. 调服务端 SearXNG 代理
+      const res = await fetch('/api/web-search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ q: msg.question, limit: 6 }),
+      });
+      if (!res.ok) {
+        const d: any = await res.json().catch(() => null);
+        throw new Error(d?.error || `搜索服务返回 ${res.status}`);
+      }
+      const ws = await res.json() as WebSearchResult;
+      if (!ws.hits?.length) {
+        set((s) => ({
+          messages: s.messages.map((m) => m.id === msgId2
+            ? { ...m, webSearching: false, modelNote: `联网搜索也没有找到相关结果${ws.unresponsiveEngines?.length ? `（部分引擎被限流：${ws.unresponsiveEngines.slice(0, 3).join('、')}）` : ''}。建议换关键词或导入相关文档。` }
+            : m),
+        }));
+        return;
+      }
+      // 2. 命中喂给 LLM 作答（grep 式 prompt 明确标注非知识库依据 + 禁 [n]）
+      const webCtx = ws.hits.map((h, i) =>
+        `【网页 ${i + 1}】${h.title}\n${h.url}\n${h.content}`).join('\n\n');
+      const userPrompt = `「联网搜索结果」如下（截至搜索时间）：\n\n${webCtx}\n\n---\n\n问题：${msg.question}\n\n请依据上述网页结果回答，并按兜底规则在开头声明。`;
+      const out = await callModel([
+        { role: 'system', content: WEB_SEARCH_SYSTEM_PROMPT },
+        { role: 'user', content: userPrompt },
+      ], new AbortController().signal);
+      const ans = (out || '').trim();
+      // 校验：联网回答不应出现 [n]（prompt 已禁，出现说明模型违反——原样展示但不渲染角标）
+      const { used } = ans ? validateCitations(ans, 0) : { used: new Set<number>() };
+      set((s) => ({
+        messages: s.messages.map((m) => m.id === msgId2
+          ? {
+            ...m,
+            text: ans || undefined,
+            used,
+            webAnswer: true,
+            webHits: ws.hits.map((h) => ({ title: h.title, url: h.url, content: h.content })),
+            webSearching: false,
+          }
+          : m),
+      }));
+    } catch (e: any) {
+      set((s) => ({
+        messages: s.messages.map((m) => m.id === msgId2
+          ? { ...m, webSearching: false, modelNote: `⚠️ 联网搜索失败：${e?.message || e}` }
+          : m),
+      }));
+    }
+    localStorage.setItem(LS_KEY, serialize(get().messages));
   },
 
   restore: () => {

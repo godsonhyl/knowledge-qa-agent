@@ -33,6 +33,8 @@ services:
       CONFLUENCE_PAT: "${CONFLUENCE_PAT:-}"
       CONFLUENCE_INSECURE_TLS: "${CONFLUENCE_INSECURE_TLS:-0}"
       CONFLUENCE_MAX_PAGES: "${CONFLUENCE_MAX_PAGES:-200}"
+      # ---- 联网搜索兜底（SearXNG，拒答后用户主动触发）----
+      SEARXNG_URL: "${SEARXNG_URL:-}"
       # ---- 管理员令牌（设了才允许清空知识库）----
       ADMIN_TOKEN: "${ADMIN_TOKEN:-}"
       BACKUP_DIR: "/app/backups"

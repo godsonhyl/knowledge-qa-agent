@@ -37,6 +37,10 @@ export interface Env {
   CONFLUENCE_INSECURE_TLS: boolean;
   CONFLUENCE_MAX_PAGES: number;
 
+  /** 联网搜索兜底：自托管 SearXNG 地址（如 http://pypi.jinde.local/searxng）。
+   *  未设置 → 拒答页不显示「联网搜索」按钮、API 503。 */
+  SEARXNG_URL: string;
+
   /** 清空知识库的管理员令牌。未设置 → 清空功能完全禁用（按钮隐藏、API 403）。
    *  设置后请求需带 X-Admin-Token 头（UI 侧有登录入口）。 */
   ADMIN_TOKEN: string;
@@ -67,6 +71,8 @@ export const ENV: Env = {
   CONFLUENCE_INSECURE_TLS: bool(process.env.CONFLUENCE_INSECURE_TLS, false),
   CONFLUENCE_MAX_PAGES: int(process.env.CONFLUENCE_MAX_PAGES, 200),
 
+  SEARXNG_URL: (process.env.SEARXNG_URL || '').replace(/\/+$/, ''),
+
   ADMIN_TOKEN: process.env.ADMIN_TOKEN || '',
 };
 
@@ -78,6 +84,9 @@ export function embedReady(): boolean {
 }
 export function confluenceReady(): boolean {
   return Boolean(ENV.CONFLUENCE_BASE_URL && ENV.CONFLUENCE_PAT);
+}
+export function webSearchReady(): boolean {
+  return Boolean(ENV.SEARXNG_URL);
 }
 
 export function safeHost(u: string): string {
@@ -96,6 +105,8 @@ export function configResp() {
     model: ENV.LLM_MODEL,
     confluence: confluenceReady(),
     embed: embedReady(),
+    /** 联网搜索兜底是否可用（服务端配置了 SEARXNG_URL） */
+    webSearch: webSearchReady(),
     /** 清空功能是否启用：只有配置了 ADMIN_TOKEN 才允许 */
     clearEnabled: Boolean(ENV.ADMIN_TOKEN),
   };

@@ -700,6 +700,34 @@ b { font-weight: 600; }
 .summary-table td.s-name { white-space: normal; word-break: break-all; max-width: 300px; }
 .summary-table tbody tr:hover td { background: var(--panel-2); }
 
+/* ---------------- 7b. 联网搜索来源（拒答兜底） ---------------- */
+
+.no-evidence-actions {
+  display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap;
+}
+.web-sources {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.web-source {
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--panel); padding: 7px 10px;
+  font-size: 12px;
+  transition: border-color .12s;
+}
+.web-source:hover { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
+.ws-title {
+  color: var(--accent); text-decoration: none; font-weight: 600; line-height: 1.4;
+  display: block;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ws-title:hover { text-decoration: underline; color: var(--accent-hover); }
+.ws-url {
+  font-size: 10.5px; color: var(--text-3); font-family: var(--mono);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px;
+}
+.ws-content { color: var(--text-2); margin-top: 3px; line-height: 1.5; }
+
 /* ---------------- 8. 输入区 ---------------- */
 
 .composer-wrap {

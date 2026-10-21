@@ -77,6 +77,7 @@ docker compose
 | `CONFLUENCE_BASE_URL` / `CONFLUENCE_PAT` | Confluence REST + PAT（绕开 SSO） |
 | `CONFLUENCE_INSECURE_TLS` | 自签证书的 Confluence 站设 `1` |
 | `CONFLUENCE_MAX_PAGES` | 子树导入上限（默认 200） |
+| `SEARXNG_URL` | 联网搜索兜底（可选）：自托管 SearXNG 地址；拒答页出现「联网搜索」按钮，结果明确标注非知识库依据 |
 | `GEN_CERT` / `HTTPS_PORT` | `1` 时自签 HTTPS 端口 3443，解锁浏览器「选择本机目录」 |
 
 ## 导入方式

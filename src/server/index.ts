@@ -10,6 +10,7 @@ import { configRoute } from './routes/config.js';
 import { chat } from './routes/chat.js';
 import { confluence } from './routes/confluence.js';
 import { searchRoute } from './routes/search.js';
+import { webSearch } from './routes/webSearch.js';
 import { staticHandler } from './routes/static.js';
 import { certRoute } from './cert.js';
 
@@ -20,6 +21,7 @@ app.route('/api/chat', chat);
 app.route('/api/confluence-page', confluence);
 app.route('/api/kb', kb);
 app.route('/api/kb', searchRoute);
+app.route('/api/web-search', webSearch);
 app.get('/api/*', (c) => c.json({ error: 'not found' }, 404));
 app.get('*', staticHandler);
 
@@ -41,6 +43,9 @@ async function main() {
     console.log(`[Confluence] ${ENV.CONFLUENCE_BASE_URL && ENV.CONFLUENCE_PAT
       ? `已接入 ${new URL(ENV.CONFLUENCE_BASE_URL).host}`
       : '未配置'}`);
+    console.log(`[联网搜索] ${ENV.SEARXNG_URL
+      ? `SearXNG @ ${new URL(ENV.SEARXNG_URL).host}（拒答兜底已启用）`
+      : '未配置。设置 SEARXNG_URL 启用拒答后的联网搜索'}`);
     console.log(`[嵌入] ${ENV.EMBED_BASE_URL
       ? `${ENV.EMBED_MODEL} ${ENV.EMBED_DIM}维（向量门 ${ENV.EMBED_VECTOR_GATE ? '开' : '关'}）`
       : '未配置'}`);

@@ -157,14 +157,16 @@ function Message({ msg, config }: { msg: ChatMessage; config: ConfigResp | null 
   const search = msg.search;
   const noEvidence = !!search && !search.hasEvidence;
   const fallbackAnswered = noEvidence && !!msg.text && !!msg.fallback;
+  const webAnswered = noEvidence && !!msg.text && !!msg.webAnswer;
   const retrievalOnlyHit = !!search && search.hasEvidence && !msg.text;
 
   return (
     <div className="msg msg-bot">
       <div className="bubble">
         <div className="bubble-head">
-          {noEvidence && !fallbackAnswered && <Tag theme="danger" variant="light" size="small">未检索到依据</Tag>}
+          {noEvidence && !fallbackAnswered && !webAnswered && <Tag theme="danger" variant="light" size="small">未检索到依据</Tag>}
           {fallbackAnswered && <Tag theme="warning" variant="light" size="small">未检索到依据 · 模型兜底</Tag>}
+          {webAnswered && <Tag theme="warning" variant="light" size="small">未检索到依据 · 联网搜索兜底</Tag>}
           {retrievalOnlyHit && <Tag theme="success" variant="light" size="small">已找到 {msg.hits?.length || 0} 条依据</Tag>}
           {msg.text && !noEvidence && <Tag theme="success" variant="light" size="small">已回答</Tag>}
           {msg.streaming && (
@@ -181,13 +183,18 @@ function Message({ msg, config }: { msg: ChatMessage; config: ConfigResp | null 
               <b>知识库里没有找到相关内容。</b>以下是模型基于自身知识给出的回答，未有原文依据，请谨慎参考。
             </div>
           )}
-          {noEvidence && !fallbackAnswered && <NoEvidence msg={msg} config={config} />}
+          {webAnswered && (
+            <div className="notice notice-warn">
+              <b>知识库里没有找到相关内容。</b>以下回答基于联网搜索结果（截至搜索时间），非知识库原文依据，请谨慎参考。
+            </div>
+          )}
+          {(noEvidence && !fallbackAnswered && !webAnswered) && <NoEvidence msg={msg} config={config} />}
           {retrievalOnlyHit && (
             <div className="notice notice-info">
               <b>仅检索模式</b>：未调用大模型，以下为命中片段。
             </div>
           )}
-          {msg.text !== undefined && msg.text !== '' && !fallbackAnswered && (
+          {msg.text !== undefined && msg.text !== '' && !fallbackAnswered && !webAnswered && (
             msg.used && msg.used.size === 0
               ? (
                 <div className="notice notice-warn">
@@ -207,6 +214,7 @@ function Message({ msg, config }: { msg: ChatMessage; config: ConfigResp | null 
               }}
             />
           )}
+          {webAnswered && !!msg.webHits?.length && <WebSources msg={msg} />}
           {msg.text && !msg.streaming && !msg.aborted && (
             <AnswerActions msg={msg} />
           )}
@@ -219,6 +227,35 @@ function Message({ msg, config }: { msg: ChatMessage; config: ConfigResp | null 
         </div>
         {!!msg.hits?.length && <EvidenceList msg={msg} />}
       </div>
+    </div>
+  );
+}
+
+/** 联网搜索命中的来源列表（可点击，独立于证据卡） */
+function WebSources({ msg }: { msg: ChatMessage }) {
+  const [collapsed, setCollapsed] = useState(false);
+  const hits = msg.webHits || [];
+  return (
+    <div className="ev-wrap ws-wrap">
+      <div className="evidence-head">
+        <span>联网来源 · {hits.length} 条（非知识库）</span>
+        <button className="collapse-btn" onClick={() => setCollapsed((c) => !c)}>
+          {collapsed ? '展开' : '收起'}
+        </button>
+      </div>
+      {!collapsed && (
+        <ol className="web-sources">
+          {hits.map((h, i) => (
+            <li key={i} className="web-source">
+              <a href={h.url} target="_blank" rel="noreferrer noopener" className="ws-title" title={h.url}>
+                {i + 1}. {h.title || h.url}
+              </a>
+              <div className="ws-url">{h.url}</div>
+              {h.content && <div className="ws-content">{h.content.slice(0, 140)}{h.content.length > 140 ? '…' : ''}</div>}
+            </li>
+          ))}
+        </ol>
+      )}
     </div>
   );
 }
@@ -273,10 +310,12 @@ function AnswerActions({ msg }: { msg: ChatMessage }) {
 
 function NoEvidence({ msg, config }: { msg: ChatMessage; config: ConfigResp | null }) {
   const requestModelNote = useChatStore((s) => s.requestModelNote);
+  const webSearchAnswer = useChatStore((s) => s.webSearchAnswer);
   const search = msg.search!;
   const reason = REASON_TEXT[search.reason] || REASON_TEXT['no-match'];
   const near = (search.allScored || []).slice(0, 3);
   const retrievalOnly = useConfigStore((s) => s.retrievalOnly);
+  const showActions = config?.ready && !retrievalOnly && !msg.webAnswer;
 
   return (
     <div className="notice notice-miss">
@@ -296,14 +335,24 @@ function NoEvidence({ msg, config }: { msg: ChatMessage; config: ConfigResp | nu
           ))}
         </div>
       )}
-      {config?.ready && !retrievalOnly && !msg.modelNote && (
-        <button
-          className="btn btn-sm btn-ghost"
-          style={{ marginTop: 8 }}
-          onClick={() => void requestModelNote(msg.id)}
-        >让模型补充说明（非知识库依据）</button>
+      {showActions && (
+        <div className="no-evidence-actions">
+          {!msg.modelNote && (
+            <button
+              className="btn btn-sm btn-ghost"
+              onClick={() => void requestModelNote(msg.id)}
+            >让模型补充说明（非知识库依据）</button>
+          )}
+          {config?.webSearch && (
+            <button
+              className="btn btn-sm btn-ghost"
+              disabled={!!msg.webSearching}
+              onClick={() => void webSearchAnswer(msg.id)}
+            >{msg.webSearching ? '联网搜索中…' : '🌐 联网搜索（非知识库依据）'}</button>
+          )}
+        </div>
       )}
-      {msg.modelNote && (
+      {msg.modelNote && !msg.webAnswer && (
         <div className="notice notice-warn" style={{ marginTop: 8 }}>{msg.modelNote}</div>
       )}
     </div>
