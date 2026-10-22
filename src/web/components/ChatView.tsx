@@ -279,6 +279,8 @@ function EvidenceList({ msg }: { msg: ChatMessage }) {
 
 function AnswerActions({ msg }: { msg: ChatMessage }) {
   const ask = useChatStore((s) => s.ask);
+  const webSearchAnswer = useChatStore((s) => s.webSearchAnswer);
+  const config = useConfigStore((s) => s.config);
   const [copied, setCopied] = useState(false);
   const [reneging, setReneging] = useState(false);
   const [voted, setVoted] = useState<'up' | 'down' | null>(null);
@@ -323,6 +325,14 @@ function AnswerActions({ msg }: { msg: ChatMessage }) {
       <button className="aa-btn" onClick={regen} disabled={reneging} title="用同样问题重新检索并作答">
         {reneging ? '生成中…' : '重新生成'}
       </button>
+      {config?.webSearch && !msg.webAnswer && (
+        <button
+          className="aa-btn"
+          disabled={!!msg.webSearching || useChatStore.getState().streaming}
+          title="知识库答得不满足？联网搜索补充（非知识库依据）"
+          onClick={() => void webSearchAnswer(msg.id)}
+        >{msg.webSearching ? '搜索中…' : '🌐 联网搜索'}</button>
+      )}
       {!msg.fallback && !msg.webAnswer && (
         <>
           <button
