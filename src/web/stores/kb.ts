@@ -63,7 +63,7 @@ const FILES_LIMIT = 500;
 let toastId = 0;
 
 async function api<T>(path: string, init?: RequestInit): Promise<{ ok: boolean; status: number; data: T }> {
-  const res = await fetch(path, { ...init, headers: { ...authHeaders() } });
+  const res = await fetch(path, { ...init, headers: { ...authHeaders(), ...((init?.headers as Record<string, string>) || {}) } });
   let data: any = null;
   try { data = await res.json(); } catch { /* empty body */ }
   if (res.status === 401) { void handleUnauthorized(); return { ok: false, status: 401, data: null as any }; }
