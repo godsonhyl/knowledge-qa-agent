@@ -21,20 +21,29 @@ export interface HybridHit extends Hit {}
 export async function hybridSearch(
   question: string,
   retriever: Retriever,
-  opts: { topK?: number; sensitivity?: number },
+  opts: { topK?: number; sensitivity?: number; variants?: string[] },
 ): Promise<SearchResult> {
   const topK = opts.topK || 8;
   const sensitivity = typeof opts.sensitivity === 'number' ? opts.sensitivity : 50;
+  const variants = (opts.variants && opts.variants.length > 0) ? opts.variants : [question];
   const started = Date.now();
 
-  // ---- 词法通道 ----
-  const lex: LexResult = retriever.search(question, { topK, sensitivity });
+  // ---- 词法通道（多路：每个变体一次 BM25，rank 取最佳）----
+  // 对每个变体单独跑 retriever.search，把各变体的 allScored 合并；
+  // 保留每块在"任一变体下"的最佳 rank（用于 RRF 第二轮融合）。
+  const lexPerVariant: LexResult[] = [];
+  for (const v of variants) {
+    lexPerVariant.push(retriever.search(v, { topK, sensitivity }));
+  }
+  // 主变体（原问题）的证据门判定为准——变体只扩召回，不放宽证据门
+  const lex = lexPerVariant[0]!;
 
   // ---- 向量通道 ----
   let vecHits: { chunkId: string; sim: number; payload: any }[] = [];
   let topSim = 0;
   if (embedReady() && ENV.EMBED_VECTOR_GATE) {
     try {
+      // 对原问题做向量检索（变体不重复嵌入，避免成本翻倍）
       const [vec] = await embed([question]);
       const results = await searchPoints(COLLECTION_CHUNKS, vec!, Math.max(topK * 3, 16));
       vecHits = results.map((r) => ({ chunkId: r.id, sim: r.score, payload: r.payload }));
@@ -44,32 +53,43 @@ export async function hybridSearch(
       console.warn(`[向量] 检索失败，降级 BM25：${(err as Error)?.message || err}`);
     }
   }
-
   // ---- 证据门：词法门 OR 向量门 ----
   const lexGate = lex.hasEvidence;
   const vecGate = topSim >= vecThreshold(sensitivity);
   const hasEvidence = lexGate || vecGate;
   const reason = lexGate ? lex.reason : (vecGate ? 'vector-sim' : lex.reason);
 
-  // ---- RRF 融合（仅用于排序与 kept 截取）----
-  const lexPool = lex.allScored.slice(0, Math.max(topK * 4, 16));
+  // ---- RRF 融合（多路词法 + 向量，二次 RRF）----
+  // 词法多路：每个变体的 allScored 都进池，每块取在"任一变体下"的最佳 rank。
+  const lexPool: LexHit[] = [];
+  const lexBestRank = new Map<string, number>();  // chunkId → 最佳（最小）rank
+  lexPerVariant.forEach((lr) => {
+    lr.allScored.slice(0, Math.max(topK * 4, 16)).forEach((h, i) => {
+      const id = h.chunk.chunkId;
+      const r = i + 1;
+      const prev = lexBestRank.get(id);
+      if (prev === undefined || r < prev) {
+        lexBestRank.set(id, r);
+        // 同时确保 pool 里有这条（去重）
+        if (!lexPool.some((p) => p.chunk.chunkId === id)) lexPool.push(h);
+      }
+    });
+  });
   const vecPool = vecHits.slice(0, Math.max(topK * 3, 16));
 
   const fusedMap = new Map<string, { lex?: LexHit; sim?: number; chunkId: string; payload?: any }>();
 
-  lexPool.forEach((h, i) => {
+  lexPool.forEach((h) => {
     const id = h.chunk.chunkId;
     fusedMap.set(id, { ...(fusedMap.get(id) || { chunkId: id }), lex: h });
-    void i;
   });
-  vecPool.forEach((h, i) => {
+  vecPool.forEach((h) => {
     const id = h.chunkId;
     fusedMap.set(id, { ...(fusedMap.get(id) || { chunkId: id }), sim: h.sim, payload: h.payload });
-    void i;
   });
 
-  const lexRank = new Map<string, number>();
-  lexPool.forEach((h, i) => lexRank.set(h.chunk.chunkId, i + 1));
+  // rank 用"最佳 rank"（多路融合后），不是单路原始位置
+  const lexRank = lexBestRank;
   const vecRank = new Map<string, number>();
   vecPool.forEach((h, i) => vecRank.set(h.chunkId, i + 1));
 
