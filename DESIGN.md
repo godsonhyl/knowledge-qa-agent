@@ -336,6 +336,10 @@ knowledge-qa-agent-ts/
 
 > **UI 翻新（2026-10）**：前端引入 `tdesign-react`（1.18.4，React 19 兼容）+ `highlight.js`（11.12.0），参照腾讯 WeKnora 的 TDesign 视觉做全量翻新。基座：`main.tsx` 引入 `tdesign-react/dist/tdesign.css`（自带 `:root[theme-mode='dark']` 双主题变量块）；`stores/theme.ts`（zustand persist `kqa.theme`，默认 system）写 `<html theme-mode="dark">` + `.dark` class，顶栏三态切换（系统/浅/暗）。组件：`Button/Switch/Input/Textarea/InputNumber/Slider/Tag` 替换原生控件，`tdesign-icons-react` 替换 emoji 图标。回答渲染（`RichText.tsx`）代码块升级为 WeKnora `chat-code-block` 风：深色底 + 语言标签 + 复制按钮 + `highlight.js/lib/core` 按需注册 11 种语言语法高亮（流式期间跳过高亮，完成后 `hljs.highlight`）。证据卡、欢迎页、弹层、查看器全部 token 化（`--td-brand` 等）。后端零改动，42 vitest 检索契约保持全绿。产物：CSS 495kB（gzip 58.6kB）、JS 547kB（gzip 172.9kB）。
 
+
+> **检索/回答/运维全链路优化（2026-10）**：在 v2.1 基础上叠加 10 项能力——
+> 父子块检索（small-to-big）/ 知识库分组 / 事实直查 / 反馈视图 / metrics / 索引增量 / 复杂问题多步检索 / 事实抽验 / 同义词词典 / 常驻联网搜索 / Confluence 增量同步。检索阈值与引用契约从 v2.0 起字面不变，48 vitest 全绿。详见 [CONTRACTS.md §12 检索增强契约](./CONTRACTS.md#12-检索增强契约)。
+
 > **PDF 导入（2026-10）**：新增 `POST /api/kb/docs/upload`（multipart/form-data）支持 PDF 二进制导入。服务端 `busboy` 流式落盘到 `os.tmpdir()` 避免大文件整载内存（500MB 上限，落盘阶段边收边校验），`unpdf`（pdf.js 封装）提取全文，空文本/扫描件返回 422，其余复用既有 `addDoc`（切块 + 嵌入 + Qdrant 双 collection upsert + 重名 409）。新增 `src/server/pdf.ts`（`extractPdfText` + `PdfNoTextError`，单测覆盖可解析 PDF 与无文字层两种情况）。前端 Dropzone `accept` 加 `.pdf`，拖拽/目录导入对 PDF 走 `uploadPdfs`（multipart 上传），文本类照旧走 JSON 入口。新增依赖：`unpdf` + `busboy`（+ `@types/busboy` dev）。`tests/pdf.test.ts` 2 个用例，总 44 vitest 全绿。
 
 ---

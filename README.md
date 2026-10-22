@@ -94,6 +94,18 @@ docker compose
 
 ## 变更记录
 
+## v2.2（2026-10）
+
+**检索/回答/运维全链路优化（10 项）**
+- 父子块检索（small-to-big）：命中子块前后各扩 1 块喂 LLM，引用定位仍用子块行号
+- 知识库分组：`GET /api/kb/groups` + `docNamePrefix`/`source` 过滤；顶栏 GroupSelect 下拉
+- 事实直查：phraseHit+topScore 高 + 断崖式领先 → 跳过 LLM 直接展示片段（零延迟零幻觉）
+- 反馈视图：FeedbackModal 负样本表（检索调优数据可视化）
+- GET /api/metrics：uptime/内存/索引规模/蒸馏/检索耗时/拒答率
+- 索引增量：BM25 增量 addDocChunks/removeDocChunks，单篇导入/删除不整库 rebuild
+- 复杂问题多步检索：classifyQuestion 拆子问题各自检索 → 合并去重；简单问题 fast path
+- 侧栏工具区重设计：主操作文字按钮 + 次操作图标按钮
+
 ### v2.1（2026-10）
 
 **UI 全量翻新（参照 WeKnora / TDesign）**

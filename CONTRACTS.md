@@ -221,13 +221,20 @@ payload: kind:"doc", name, source, size, addedAt, text
 
 ## 12. 检索增强契约（不破坏阈值）
 
-两项增强均**不改** retriever/bm25/chunker 玈阈值，只扩召回面：
+各增强均**不改** retriever/bm25/chunker 阈值，只扩召回面或重排序：
 
 | 增强 | 实现 | 失败退路 |
 |---|---|---|
 | 查询改写 | `queryRewrite.ts`：LLM 生成 2-3 变体 + 同义词词典扩展；多路词法融合后与向量做二轮 RRF | LLM 失败/超时 3.5s → `[原问题]+词典` |
 | Reranker | `rerank.ts`：RRF 后取 top-N(`max(topK*3,20)`) → 网关 `/v1/rerank` → 截 topK | 失败/未配置 → 沿用 RRF 排序 |
 | 同义词词典 | `synonyms.ts`：`expandQueryWithSynonyms` 命中 alias → canonical 补入变体；最多 2 组 | 无词典命中 → 无变体 |
+| 父子块（small-to-big） | `BM25Index.parentText`：命中子块前后各扩 1 块合并 → `Hit.parentText` 喂 LLM；引用定位仍用子块行号 | 索引未初始化时跳过（等下次 rebuild） |
+| 知识库分组 | `GET /api/kb/groups` 派生 + `/api/kb/search` 支持 `docNamePrefix`/`source`（Qdrant filter + BM25 后置裁剪） | 无分组参数 → 全库检索 |
+| 事实直查 | `phraseHit≥1 && topScore≥18` + 断崖式领先 → `directAnswer=true`；前端跳过 LLM 直接展示 | 不满足条件 → 正常走 LLM |
+| 复杂问题多步 | `multiStep.ts` `classifyQuestion`（2.5s 超时）拆 2-4 子问题，各自 `hybridSearch` → `mergeHits` 去重合并 | 失败/简单问题 → fast path 单路检索 |
+| 索引增量 | `BM25Index.addDocChunks`/`removeDocChunks` 增量维护 df/avgLen/byDocIndex；单篇导入/删除不整库 rebuild | 索引未初始化时跳过 |
+| 运维指标 | `GET /api/metrics` + `search.recordSearch` 上报；进程内存级（重启归零） | Qdrant 不可用时 stats 置零 |
+| 反馈数据 | `POST/GET /api/feedback`，Qdrant `kqa_feedback`，自动 prune 500 条 | — |
 
 证据门以主变体判定为准（变体只扩召回，不放宽门）。
 
