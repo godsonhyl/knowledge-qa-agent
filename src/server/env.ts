@@ -34,6 +34,8 @@ export interface Env {
   RERANK_MODEL: string;
   /** Rerank 超时（ms），默认 4s */
   RERANK_TIMEOUT_MS: number;
+  /** 定时备份间隔（ms，默认 24h）；设 0 关闭 */
+  BACKUP_INTERVAL_MS: number;
 
   QDRANT_URL: string;
   COLLECTION_CHUNKS: string;
@@ -73,6 +75,7 @@ export const ENV: Env = {
 
   RERANK_MODEL: process.env.RERANK_MODEL || '',
   RERANK_TIMEOUT_MS: int(process.env.RERANK_TIMEOUT_MS, 4000),
+  BACKUP_INTERVAL_MS: int(process.env.BACKUP_INTERVAL_MS, 24 * 60 * 60 * 1000),
 
   QDRANT_URL: (process.env.QDRANT_URL || 'http://qdrant:6333').replace(/\/+$/, ''),
   COLLECTION_CHUNKS: process.env.COLLECTION_CHUNKS || 'kqa_chunks',

@@ -271,6 +271,22 @@ kb.delete('/docs', async (c) => {
 });
 
 /** GET /api/kb/backups —— 列出已有快照（管理用，非管理员也能看，只含元信息） */
+/** POST /api/kb/backup —— 手动触发备份（管理员令牌）。
+   导出全库快照到 BACKUP_DIR/kb-<ts>.json，自动 prune 10 份。
+ */
+kb.post('/backup', async (c) => {
+  if (!adminGate(c)) return adminError(c);
+  try {
+    const docs = await exportForBackup();
+    if (!docs.length) return c.json({ error: '知识库为空，无从备份' }, 400 as 400);
+    const file = writeKbBackup(docs);
+    pruneKbBackups();
+    return c.json({ ok: true, file: file ? file.split('/').pop() : null, docCount: docs.length });
+  } catch (err) {
+    return c.json({ error: String((err as Error)?.message || err) }, 500);
+  }
+});
+
 kb.get('/backups', async (c) => {
   const all = listKbBackups();
   return c.json({ backups: all.map((b) => ({ file: b.file.split('/').pop(), exportedAt: b.exportedAt, docCount: b.docCount, size: b.size })) });

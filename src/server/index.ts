@@ -5,6 +5,7 @@ import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
 import { ENV, configResp, llmReady } from './env.js';
 import { kbIndex } from './kbIndex.js';
+import { startBackupTimer } from './backup.js';
 import { kb } from './routes/kb.js';
 import { configRoute } from './routes/config.js';
 import { chat } from './routes/chat.js';
@@ -56,6 +57,13 @@ async function main() {
       ? `${ENV.EMBED_MODEL} ${ENV.EMBED_DIM}维（向量门 ${ENV.EMBED_VECTOR_GATE ? '开' : '关'}）`
       : '未配置'}`);
     console.log(`[Qdrant] ${ENV.QDRANT_URL} · ${ENV.COLLECTION_CHUNKS}/${ENV.COLLECTION_DOCS}`);
+    // 定时备份（默认 24h，设 0 关闭；存于 BACKUP_DIR，自动 prune 10 份）
+    if (ENV.BACKUP_INTERVAL_MS > 0) {
+      startBackupTimer(ENV.BACKUP_INTERVAL_MS);
+      console.log(`[备份] 定时备份已启用（每 ${Math.round(ENV.BACKUP_INTERVAL_MS / 60000)} 分钟），存于 ${process.env.BACKUP_DIR || './backups'}`);
+    } else {
+      console.log('[备份] 定时备份已关闭（BACKUP_INTERVAL_MS=0）');
+    }
   });
 
   if (ENV.GEN_CERT) certRoute(app, ENV.HOST, ENV.HTTPS_PORT);

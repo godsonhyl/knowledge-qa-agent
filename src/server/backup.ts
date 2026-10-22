@@ -103,4 +103,24 @@ export function pruneKbBackups(keep = 10): void {
   }
 }
 
+/** 启动定时备份：按间隔（默认 24h）周期性导出快照。
+ *  与"清空前备份"互补——这是"非破坏性"的快照，用于防范渐进误删/腐化。
+ *  定时器句柄暴露供停止用。 */
+export function startBackupTimer(intervalMs: number = 24 * 60 * 60 * 1000): ReturnType<typeof setTimeout> | null {
+  if (intervalMs < 60 * 1000) intervalMs = 60 * 1000;  // 最低 1 分钟
+  const timer = setInterval(async () => {
+    try {
+      const { exportForBackup } = await import('./kbStore.js');
+      const docs = await exportForBackup();
+      if (docs.length) {
+        writeKbBackup(docs);
+        pruneKbBackups();
+      }
+    } catch (err) {
+      console.warn(`[备份] 定时备份失败：${(err as Error)?.message || err}`);
+    }
+  }, intervalMs);
+  return timer;
+}
+
 void unlinkSync;

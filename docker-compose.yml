@@ -41,6 +41,7 @@ services:
       # ---- 管理员令牌（设了才允许清空知识库）----
       ADMIN_TOKEN: "${ADMIN_TOKEN:-}"
       BACKUP_DIR: "/app/backups"
+      BACKUP_INTERVAL_MS: "${BACKUP_INTERVAL_MS:-86400000}"
       # ---- 可选：自签 HTTPS（解锁浏览器安全上下文）----
       GEN_CERT: "${GEN_CERT:-0}"
       HTTPS_PORT: "${HTTPS_PORT:-3443}"
