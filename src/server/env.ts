@@ -28,6 +28,13 @@ export interface Env {
   EMBED_DIM: number;
   EMBED_VECTOR_GATE: boolean;   // 向量证据门开关（校准不过先关）
 
+  /** Reranker 模型（cross-encoder 精排，提升 top-K 精度）。
+   *  网关需支持 /v1/rerank（Cohere/TEI/vLLM 兼容）。
+   *  留空 → 不启用 rerank，沿用 RRF 排序。 */
+  RERANK_MODEL: string;
+  /** Rerank 超时（ms），默认 4s */
+  RERANK_TIMEOUT_MS: number;
+
   QDRANT_URL: string;
   COLLECTION_CHUNKS: string;
   COLLECTION_DOCS: string;
@@ -64,6 +71,9 @@ export const ENV: Env = {
   EMBED_DIM: int(process.env.EMBED_DIM, 1024),
   EMBED_VECTOR_GATE: bool(process.env.EMBED_VECTOR_GATE, true),
 
+  RERANK_MODEL: process.env.RERANK_MODEL || '',
+  RERANK_TIMEOUT_MS: int(process.env.RERANK_TIMEOUT_MS, 4000),
+
   QDRANT_URL: (process.env.QDRANT_URL || 'http://qdrant:6333').replace(/\/+$/, ''),
   COLLECTION_CHUNKS: process.env.COLLECTION_CHUNKS || 'kqa_chunks',
   COLLECTION_DOCS: process.env.COLLECTION_DOCS || 'kqa_docs',
@@ -90,6 +100,9 @@ export function confluenceReady(): boolean {
 }
 export function webSearchReady(): boolean {
   return Boolean(ENV.SEARXNG_URL);
+}
+export function rerankReady(): boolean {
+  return Boolean(ENV.RERANK_MODEL && ENV.EMBED_BASE_URL);
 }
 
 export function safeHost(u: string): string {

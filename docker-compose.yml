@@ -24,6 +24,9 @@ services:
       EMBED_MODEL: "${EMBED_MODEL:-BAAI/bge-m3}"
       EMBED_DIM: "${EMBED_DIM:-1024}"
       EMBED_VECTOR_GATE: "${EMBED_VECTOR_GATE:-1}"
+      # ---- Reranker 精排（可选，网关需支持 /v1/rerank）----
+      RERANK_MODEL: "${RERANK_MODEL:-}"
+      RERANK_TIMEOUT_MS: "${RERANK_TIMEOUT_MS:-4000}"
       # ---- Qdrant（compose 内部网络）----
       QDRANT_URL: "http://kqa-ts-qdrant:6333"
       COLLECTION_CHUNKS: "kqa_chunks"

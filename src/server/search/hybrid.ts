@@ -5,6 +5,7 @@ import { ENV, embedReady } from '../env.js';
 import { embed } from '../embeddings.js';
 import { searchPoints } from '../qdrant.js';
 import { COLLECTION_CHUNKS } from '../kbStore.js';
+import { rerankHits } from '../rerank.js';
 import type { Retriever, LexHit, LexResult } from './retriever.js';
 import type { Hit, SearchResult } from '@shared/types.js';
 
@@ -130,15 +131,19 @@ export async function hybridSearch(
   const maxFused = all.length ? all[0]!.fused : 1;
   for (const h of all) h.rel = Number((h.fused / maxFused).toFixed(3));
 
-  // kept：有证据时按融合排序取前 topK；无证据时为空
+  // kept：有证据时先取 top-N 候选（默认 max(topK*3, 20)），rerank 精排后截 topK
   let kept: Hit[] = [];
   if (hasEvidence) {
-    kept = all.filter((h) => {
+    const rerankPool = all.filter((h) => {
       // 至少在某一通道有非零分
       const lexOk = h.lex ? h.lex.score > 0 : false;
       const vecOk = h.sim !== undefined && h.sim >= Math.max(0.4, vecThreshold(sensitivity) - 0.05);
       return lexOk || vecOk;
-    }).slice(0, topK);
+    });
+    const pool = rerankPool.slice(0, Math.max(topK * 3, 20));
+    // rerank 精排（失败/未配置则退回 RRF 排序，截 topK）
+    const { hits: reranked } = await rerankHits(question, pool, topK);
+    kept = reranked;
   }
 
   return {
