@@ -281,6 +281,7 @@ function AnswerActions({ msg }: { msg: ChatMessage }) {
   const ask = useChatStore((s) => s.ask);
   const [copied, setCopied] = useState(false);
   const [reneging, setReneging] = useState(false);
+  const [voted, setVoted] = useState<'up' | 'down' | null>(null);
 
   function copy() {
     const text = msg.text || '';
@@ -296,6 +297,24 @@ function AnswerActions({ msg }: { msg: ChatMessage }) {
     void ask(msg.question || '').finally(() => setReneging(false));
   }
 
+  function vote(fb: 'up' | 'down') {
+    if (voted) return;
+    setVoted(fb);
+    // 静默上报：失败不打扰用户
+    void fetch('/api/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        question: msg.question || '',
+        answerExcerpt: (msg.text || '').slice(0, 500),
+        hitDocs: (msg.hits || []).slice(0, 5).map((h) => h.docName),
+        feedback: fb,
+        mode: msg.fallback ? 'fallback' : msg.webAnswer ? 'web' : 'normal',
+        convId: null,
+      }),
+    }).catch(() => undefined);
+  }
+
   return (
     <div className="answer-actions">
       <button className="aa-btn" onClick={copy} title="复制回答（含引用标记）">
@@ -304,6 +323,24 @@ function AnswerActions({ msg }: { msg: ChatMessage }) {
       <button className="aa-btn" onClick={regen} disabled={reneging} title="用同样问题重新检索并作答">
         {reneging ? '生成中…' : '重新生成'}
       </button>
+      {!msg.fallback && !msg.webAnswer && (
+        <>
+          <button
+            className="aa-btn"
+            style={voted === 'up' ? { borderColor: 'var(--ok)', color: 'var(--ok)' } : {}}
+            disabled={!!voted}
+            title="这条回答有帮助"
+            onClick={() => vote('up')}
+          >👍</button>
+          <button
+            className="aa-btn"
+            style={voted === 'down' ? { borderColor: 'var(--danger)', color: 'var(--danger)' } : {}}
+            disabled={!!voted}
+            title="这条回答不准确/没解决我的问题"
+            onClick={() => vote('down')}
+          >👎</button>
+        </>
+      )}
     </div>
   );
 }
