@@ -1,4 +1,5 @@
 import { Button } from 'tdesign-react';
+import { ChartBarIcon, ThumbUpIcon, DeleteIcon, RefreshIcon } from 'tdesign-icons-react';
 import { useEffect, useRef, useState } from 'react';
 import { useKbStore } from '../stores/kb.js';
 import { useConfigStore } from '../stores/config.js';
@@ -75,30 +76,48 @@ export function Sidebar() {
         <Dropzone />
         <ConfluenceImport />
 
-        <div className="kb-actions">
-          <Button variant="outline" size="small" onClick={() => loadSeed()}>载入示例</Button>
-          <Button variant="outline" size="small" onClick={() => window.dispatchEvent(new CustomEvent('open-summary'))}>汇总</Button>
-          <Button variant="outline" size="small" title="查看 👍/👎 反馈汇总（检索调优数据）" onClick={() => window.dispatchEvent(new CustomEvent('open-feedback'))}>反馈</Button>
-          {config?.confluence && (
-            <Button
-              variant="outline"
-              size="small"
-              title="按版本号比对库内 Confluence 页面，有变更的重新抓取并重建索引"
-              disabled={loading}
-              onClick={() => void syncConfluence()}
-            >同步 Confluence</Button>
-          )}
-          {clearEnabled ? (
+        {/* 工具区：紧凑图标排（主操作文字按钮 + 次操作图标按钮），一行放下且不挤 */}
+        <div className="kb-toolbar">
+          <div className="kb-toolbar-main">
+            <Button variant="outline" size="small" onClick={() => loadSeed()}>载入示例</Button>
+            {config?.confluence && (
+              <Button
+                variant="outline"
+                size="small"
+                icon={<RefreshIcon />}
+                title="按版本号比对库内 Confluence 页面，有变更的重新抓取并重建索引"
+                disabled={loading}
+                onClick={() => void syncConfluence()}
+              >同步</Button>
+            )}
+          </div>
+          <div className="kb-toolbar-icons">
             <button
-              className={`btn btn-sm ${clearArmed ? 'btn-danger-armed' : 'btn-ghost danger'}`}
-              title={clearArmed ? '再点一次确认清空' : '清空全部文档（不可恢复，需管理员令牌）'}
-              onClick={onClearClick}
-            >
-              {clearArmed ? `确认清空 ${docs.length} 篇` : '清空'}
-            </button>
-          ) : (
-            <Button variant="outline" size="small" disabled title="清空功能未启用：服务端需设置 ADMIN_TOKEN">清空（禁用）</Button>
-          )}
+              className="tool-icon"
+              title="知识库汇总"
+              onClick={() => window.dispatchEvent(new CustomEvent('open-summary'))}
+            ><ChartBarIcon /></button>
+            <button
+              className="tool-icon"
+              title="反馈汇总（👍/👎 检索调优数据）"
+              onClick={() => window.dispatchEvent(new CustomEvent('open-feedback'))}
+            ><ThumbUpIcon /></button>
+            {clearEnabled ? (
+              <button
+                className={`tool-icon ${clearArmed ? 'tool-icon-danger' : ''}`}
+                title={clearArmed
+                  ? `再点一次确认清空 ${docs.length} 篇（需管理员令牌，不可恢复）`
+                  : '清空全部文档（需管理员令牌，不可恢复）'}
+                onClick={onClearClick}
+              >{clearArmed ? <span className="tool-icon-danger-text">确认 {docs.length} 篇</span> : <DeleteIcon />}</button>
+            ) : (
+              <button
+                className="tool-icon"
+                disabled
+                title="清空功能未启用：服务端需设置 ADMIN_TOKEN"
+              ><DeleteIcon /></button>
+            )}
+          </div>
         </div>
 
         <div className="distill-all">
