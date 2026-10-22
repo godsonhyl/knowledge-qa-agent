@@ -6,6 +6,7 @@ import { useConfigStore } from '../stores/config.js';
 import { useKbStore } from '../stores/kb.js';
 import { useCiteStore } from '../stores/cite.js';
 import { useThemeStore, type ThemeMode } from '../stores/theme.js';
+import { authHeaders } from '../stores/auth.js';
 import { REASON_TEXT } from '../qaPrompt.js';
 import { EvidenceCard } from './EvidenceCard.js';
 import { RichText } from './RichText.js';
@@ -128,7 +129,7 @@ function GroupSelect() {
   const group = useConfigStore((s) => s.group);
   const setGroup = useConfigStore((s) => s.setGroup);
   useEffect(() => {
-    void fetch('/api/kb/groups').then((r) => r.json()).then((d: any) => {
+    void fetch('/api/kb/groups', { headers: authHeaders() }).then((r) => r.json()).then((d: any) => {
       if (Array.isArray(d?.groups)) setGroups(d.groups);
     }).catch(() => undefined);
   }, []);
@@ -346,7 +347,7 @@ function AnswerActions({ msg }: { msg: ChatMessage }) {
     // 静默上报：失败不打扰用户
     void fetch('/api/feedback', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({
         question: msg.question || '',
         answerExcerpt: (msg.text || '').slice(0, 500),

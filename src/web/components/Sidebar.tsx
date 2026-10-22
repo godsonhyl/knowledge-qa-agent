@@ -1,8 +1,9 @@
 import { Button } from 'tdesign-react';
-import { ChartBarIcon, ThumbUpIcon, DeleteIcon, RefreshIcon } from 'tdesign-icons-react';
+import { ChartBarIcon, ThumbUpIcon, DeleteIcon, RefreshIcon, PoweroffIcon } from 'tdesign-icons-react';
 import { useEffect, useRef, useState } from 'react';
 import { useKbStore } from '../stores/kb.js';
 import { useConfigStore } from '../stores/config.js';
+import { useAuthStore } from '../stores/auth.js';
 import { Dropzone } from './Dropzone.js';
 import { ConfluenceImport } from './ConfluenceImport.js';
 import { DocList } from './DocList.js';
@@ -19,6 +20,7 @@ export function Sidebar() {
   const startDistillAll = useKbStore((s) => s.startDistillAll);
   const stopDistillAll = useKbStore((s) => s.stopDistillAll);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const ssoUser = useAuthStore((s) => s.user);
 
   // 清空需要管理员令牌。clearEnabled=false（服务端没配 ADMIN_TOKEN）→ 按钮直接隐藏。
   const clearEnabled = !!config?.clearEnabled;
@@ -70,6 +72,12 @@ export function Sidebar() {
             <p>每条回答都标出处</p>
           </div>
         </div>
+        {ssoUser && (
+          <div className="sso-user">
+            <span className="sso-user-name" title={ssoUser.email || ssoUser.name}>{ssoUser.name || ssoUser.username}</span>
+            <button className="sso-logout" title="退出登录" onClick={() => { void useAuthStore.getState().logout(); }}><PoweroffIcon /></button>
+          </div>
+        )}
       </div>
 
       <div className="side-section">

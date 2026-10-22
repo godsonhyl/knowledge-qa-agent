@@ -55,6 +55,17 @@ export interface Env {
   /** 清空知识库的管理员令牌。未设置 → 清空功能完全禁用（按钮隐藏、API 403）。
    *  设置后请求需带 X-Admin-Token 头（UI 侧有登录入口）。 */
   ADMIN_TOKEN: string;
+
+  /** ---- SSO/OIDC 鉴权（Keycloak 等兼容 IdP，Authorization Code + PKCE）----
+   *  配齐 ISSUER/CLIENT_ID/CLIENT_SECRET 才启用；OIDC_REQUIRED=1 时未登录访问受保护 API → 401/跳登录。
+   *  未配置 → 行为同现状（所有 API 免鉴权），回归不退化。 */
+  OIDC_ISSUER: string;
+  OIDC_CLIENT_ID: string;
+  OIDC_CLIENT_SECRET: string;
+  OIDC_REDIRECT_URI: string;
+  OIDC_SCOPE: string;
+  /** 1 = 强制鉴权（全部需登录）；0 = 可选（登录入口可见但不强制）。默认 0 */
+  OIDC_REQUIRED: boolean;
 }
 
 export const ENV: Env = {
@@ -90,6 +101,13 @@ export const ENV: Env = {
   SEARXNG_URL: (process.env.SEARXNG_URL || '').replace(/\/+$/, ''),
 
   ADMIN_TOKEN: process.env.ADMIN_TOKEN || '',
+
+  OIDC_ISSUER: (process.env.OIDC_ISSUER || '').replace(/\/+$/, ''),
+  OIDC_CLIENT_ID: process.env.OIDC_CLIENT_ID || '',
+  OIDC_CLIENT_SECRET: process.env.OIDC_CLIENT_SECRET || '',
+  OIDC_REDIRECT_URI: (process.env.OIDC_REDIRECT_URI || '').replace(/\/+$/, ''),
+  OIDC_SCOPE: process.env.OIDC_SCOPE || 'openid profile email',
+  OIDC_REQUIRED: bool(process.env.OIDC_REQUIRED, false),
 };
 
 export function llmReady(): boolean {
@@ -103,6 +121,9 @@ export function confluenceReady(): boolean {
 }
 export function webSearchReady(): boolean {
   return Boolean(ENV.SEARXNG_URL);
+}
+export function oidcReady(): boolean {
+  return Boolean(ENV.OIDC_ISSUER && ENV.OIDC_CLIENT_ID && ENV.OIDC_CLIENT_SECRET);
 }
 export function rerankReady(): boolean {
   return Boolean(ENV.RERANK_MODEL && ENV.EMBED_BASE_URL);
@@ -128,6 +149,13 @@ export function configResp() {
     webSearch: webSearchReady(),
     /** 清空功能是否启用：只有配置了 ADMIN_TOKEN 才允许 */
     clearEnabled: Boolean(ENV.ADMIN_TOKEN),
+    /** SSO/OIDC 鉴权配置（仅下发登录入口与开关，绝不下发 secret） */
+    sso: {
+      enabled: oidcReady(),
+      required: oidcReady() && ENV.OIDC_REQUIRED,
+      providerName: 'SSO 登录',
+      loginUrl: '/api/auth/oidc/login',
+    },
   };
 }
 

@@ -6,6 +6,7 @@ import type { SearchResult, Hit, WebSearchResult } from '@shared/types.js';
 import { SYSTEM_PROMPT, FALLBACK_SYSTEM_PROMPT, WEB_SEARCH_SYSTEM_PROMPT, REASON_TEXT } from '../qaPrompt.js';
 import { validateCitations } from '../citations.js';
 import { verifyFacts } from '../factCheck.js';
+import { authHeaders, handleUnauthorized } from './auth.js';
 import { useConvStore } from './convs.js';
 
 export interface ChatMessage {
@@ -75,7 +76,7 @@ function deserialize(): ChatMessage[] {
 async function callModel(messages: { role: string; content: string }[], signal: AbortSignal): Promise<string | null> {
   const res = await fetch('/api/chat', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ messages }),
     signal,
   }).catch((e: Error) => {
@@ -84,6 +85,7 @@ async function callModel(messages: { role: string; content: string }[], signal: 
   });
 
   if (!res.ok) {
+    if (res.status === 401) { handleUnauthorized(); throw new Error('未登录'); }
     let detail = '';
     try { const j = await res.json(); detail = j.error || j.detail || ''; } catch { /* ignore */ }
     throw new Error(`模型接口返回 ${res.status}：${String(detail).slice(0, 200)}`);
@@ -139,9 +141,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (groupSel) searchBody.docNamePrefix = groupSel;
     const searchR = await fetch('/api/kb/search', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify(searchBody),
     });
+    if (searchR.status === 401) { handleUnauthorized(); return; }
     const search = await searchR.json() as SearchResult;
 
     const botId = ++msgId;
@@ -396,9 +399,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // 1. 调服务端 SearXNG 代理
       const res = await fetch('/api/web-search', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ q: msg.question, limit: 6 }),
       });
+      if (res.status === 401) { handleUnauthorized(); return; }
       if (!res.ok) {
         const d: any = await res.json().catch(() => null);
         throw new Error(d?.error || `搜索服务返回 ${res.status}`);

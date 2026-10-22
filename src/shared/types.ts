@@ -97,6 +97,17 @@ export interface KbGroup {
   count: number;
 }
 
+export interface SsoConfig {
+  /** SSO 是否可用（服务端配置了 OIDC_ISSUER/CLIENT_ID/SECRET） */
+  enabled: boolean;
+  /** 是否强制鉴权：未登录访问受保护 API → 401/跳登录 */
+  required: boolean;
+  /** IdP 显示名（如 "SSO登录"），登录按钮文案 */
+  providerName: string;
+  /** 登录入口：浏览器 GET 此地址即跳 Keycloak authorize */
+  loginUrl: string;
+}
+
 export interface ConfigResp {
   ready: boolean;
   baseUrlHost: string;
@@ -107,6 +118,8 @@ export interface ConfigResp {
   webSearch: boolean;
   /** 清空功能是否启用（服务端配置了 ADMIN_TOKEN 才为 true） */
   clearEnabled: boolean;
+  /** SSO/OIDC 鉴权配置（绝不下发 secret，仅下发登录入口与开关） */
+  sso: SsoConfig;
 }
 
 /** POST /api/web-search 返回的联网命中条目（SearXNG 裁剪后） */

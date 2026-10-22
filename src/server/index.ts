@@ -2,8 +2,9 @@
    server/index.ts —— 服务端入口
    ============================================================ */
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import { serve } from '@hono/node-server';
-import { ENV, configResp, llmReady } from './env.js';
+import { ENV, configResp, llmReady, oidcReady } from './env.js';
 import { kbIndex } from './kbIndex.js';
 import { startBackupTimer } from './backup.js';
 import { kb } from './routes/kb.js';
@@ -15,12 +16,48 @@ import { webSearch } from './routes/webSearch.js';
 import { conversationsRoute } from './routes/conversations.js';
 import { feedbackRoute } from './routes/feedback.js';
 import { metricsRoute } from './routes/metrics.js';
+import { authRoute } from './routes/auth.js';
+import { verifyAccessToken } from './oidc.js';
 import { staticHandler } from './routes/static.js';
 import { certRoute } from './cert.js';
 
 const app = new Hono();
 
+// ---- SSO/OIDC 鉴权 ----
+// 放行：/api/config（前端探测就绪）、/api/auth/*（登录流程本身）。
+// 受保护：其余 /api/*。OIDC_REQUIRED=0 时鉴权不强制（保留现状免鉴权），仅校验带了 token 的请求。
+const PUBLIC_PREFIXES = ['/api/config', '/api/auth'];
+async function authMiddleware(c: Context, next: () => Promise<void>): Promise<void | Response> {
+  const path = new URL(c.req.url).pathname;
+  if (PUBLIC_PREFIXES.some((p) => path === p || path.startsWith(p + '/'))) return next();
+  if (!oidcReady()) return next();           // 未配置 OIDC → 行为同现状
+  const required = ENV.OIDC_REQUIRED;
+  const auth = c.req.header('Authorization') || '';
+  const bearer = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+  if (bearer) {
+    try {
+      const claims = await verifyAccessToken(bearer);
+      // 注入用户信息到 context（routes 可选读取）
+      c.set('ssoUser', { sub: claims.sub, name: claims.name || claims.preferred_username || '', email: claims.email || '' });
+      return next();
+    } catch (err) {
+      // token 无效：若强制鉴权 → 401；否则放行（降级为匿名，与 =0 行为一致）
+      if (!required) return next();
+      return c.json({ error: 'token 无效或已过期', detail: (err as Error).message }, 401);
+    }
+  }
+  // 无 token
+  if (!required) return next();
+  // API 请求 → 401；浏览器导航（Accept: text/html）→ 跳登录
+  if (c.req.header('Accept')?.includes('text/html')) {
+    return c.redirect('/api/auth/oidc/login', 302);
+  }
+  return c.json({ error: '未登录', loginUrl: '/api/auth/oidc/login' }, 401);
+}
+
+app.use('/api/*', authMiddleware);
 app.route('/api/config', configRoute);
+app.route('/api/auth', authRoute);
 app.route('/api/chat', chat);
 app.route('/api/confluence-page', confluence);
 app.route('/api/kb', kb);
@@ -57,6 +94,9 @@ async function main() {
       ? `${ENV.EMBED_MODEL} ${ENV.EMBED_DIM}维（向量门 ${ENV.EMBED_VECTOR_GATE ? '开' : '关'}）`
       : '未配置'}`);
     console.log(`[Qdrant] ${ENV.QDRANT_URL} · ${ENV.COLLECTION_CHUNKS}/${ENV.COLLECTION_DOCS}`);
+    console.log(`[SSO/OIDC] ${oidcReady()
+      ? `${ENV.OIDC_ISSUER}（client ${ENV.OIDC_CLIENT_ID}，${ENV.OIDC_REQUIRED ? '强制鉴权' : '可选登录'}）`
+      : '未配置。设置 OIDC_* 启用单点登录'}`);
     // 定时备份（默认 24h，设 0 关闭；存于 BACKUP_DIR，自动 prune 10 份）
     if (ENV.BACKUP_INTERVAL_MS > 0) {
       startBackupTimer(ENV.BACKUP_INTERVAL_MS);

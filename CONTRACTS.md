@@ -238,7 +238,28 @@ payload: kind:"doc", name, source, size, addedAt, text
 
 证据门以主变体判定为准（变体只扩召回，不放宽门）。
 
-## 13. 测试即契约
+## 13. SSO/OIDC 鉴权契约
+
+参照 WeKnora 的 OIDC 接入（Authorization Code + PKCE S256），IdP 为 Keycloak（`http://sso.jinde.local/realms/test`）。
+
+| 契约 | 实现 |
+|---|---|
+| **未配置即不启用** | 未配齐 `OIDC_ISSUER/CLIENT_ID/SECRET` → 中间件直接放行，所有 API 免鉴权（与历史行为一致，回归不退化）；`/api/config` 的 `sso.enabled=false`，登录页不出现 |
+| **密钥隔离** | `OIDC_CLIENT_SECRET` 只在服务端 env；`/api/config` 仅下发 `{enabled, required, providerName, loginUrl}`，绝不下发 secret/client_secret |
+| **放行白名单** | `/api/config`（就绪探测）+ `/api/auth/*`（登录流程本身）免鉴权；其余 `/api/*` 受保护 |
+| **强制开关** | `OIDC_REQUIRED=0`（默认）：鉴权不强制，不挂 SSO 也能用；`=1`：无 token → API 401（附 `loginUrl`），HTML 导航 302 跳 `/api/auth/oidc/login` |
+| **token 验签** | access/id token 必须是 RS256 JWT，`iss === OIDC_ISSUER`、`aud` 含 `client_id`、`exp` 未过期；签名经 JWKS 公钥（缓存 24h，kid 轮换自动重拉）`createVerify('RSA-SHA256')` 校验；alg 白名单仅 RS256 |
+| **PKCE** | verifier 48 字节随机，`S256` challenge；state + verifier 存服务端内存 Map，**一次性消费**（`takePending` 删后即失效，防重放），5 分钟 TTL |
+| **会话凭证** | 回调页把 `access_token` 写 `localStorage('kqa.token')`（与 WeKnora `weknora_token` 同模型），每个 API 请求 `Authorization: Bearer`；`refreshToken`/`user` 存 `kqa.refreshToken`/`kqa.user` |
+| **401 统一处理** | 前端任一 API 收到 401 → 清凭证 → 回登录页（`handleUnauthorized`） |
+| **服务端无会话表** | 无状态鉴权：不存 session，全部靠 token 自校验；state Map 仅是登录流程的临时暂存 |
+| **检索单测不受影响** | §4/§5 直接调 retriever，不经 HTTP 鉴权层；`tests/oidc.test.ts` 用本地生成 RSA 密钥 + 假 IdP 覆盖 PKCE/state/jwt 校验/防伪造 |
+
+**Keycloak 侧配置**：realm `test` 新建 confidential client（如 `kqa-test`），开启 Standard Flow，Valid Redirect URI 填 `http://<host>:3002/api/auth/oidc/callback`（HTTPS 部署用 `https://<host>:3443/...`）。
+
+---
+
+## 14. 测试即契约
 
 | 测试 | 覆盖契约 |
 |---|---|
@@ -247,9 +268,10 @@ payload: kind:"doc", name, source, size, addedAt, text
 | `tests/confluence.test.ts` | §11 Confluence URL 解析（4 种形式 + 拒绝）+ storage→纯文本 + 引用编号校验 |
 | `tests/pdf.test.ts` | §PDF-1 可解析 PDF 提取原文；§PDF-2 无文字层抛 `PdfNoTextError` |
 | `tests/factCheck.test.ts` | §FC-1 数字在原文无警告；§FC-2 IP 无依据挂警告；§FC-3 版本主段豁免；§FC-4 只看被引用片段 |
+| `tests/oidc.test.ts` | §13 SSO/OIDC：PKCE challenge、state 一次性消费、RS256 jwt（iss/aud/exp）校验、签名篡改与 alg 白名单 |
 | `scripts/e2e.mjs` | 对运行中的 stack：种子导入 + §4/§5 + 引用偏移往返 + chat SSE 透传 |
 
-**合入门槛**：任何检索层改动前先跑 `npm test`（44 全绿）；UI 改动后跑 `npm run typecheck` + `build`。
+**合入门槛**：任何检索层改动前先跑 `npm test`（56 全绿）；UI 改动后跑 `npm run typecheck` + `build`。
 
 ---
 

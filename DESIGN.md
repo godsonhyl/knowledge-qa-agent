@@ -114,6 +114,7 @@ docker compose up -d
 | `CONFLUENCE_BASE_URL` / `CONFLUENCE_PAT` | | Confluence 导入（自签 TLS 用 `CONFLUENCE_INSECURE_TLS=1`）|
 | `CONFLUENCE_MAX_PAGES` | | 子树导入上限（默认 200，现网设 10000）|
 | `ADMIN_TOKEN` | | **管理员令牌**：设了才允许清空/批量蒸馏/恢复；不设则全部禁用 |
+| `OIDC_ISSUER` / `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | | **SSO/OIDC 单点登录**（Keycloak）：配齐三 个才启用；`OIDC_REDIRECT_URI` 填回调地址、`OIDC_REQUIRED=1` 强制全部登录。未配置 → 所有 API 免鉴权（历史行为）|
 | `GEN_CERT` / `HTTPS_PORT` | | 自签 HTTPS（解锁浏览器安全上下文）|
 | `HOST_PORT` / `HTTPS_HOST_PORT` | | 宿主映射（默认 3002 / 3443）|
 | `BACKUP_DIR` | | 快照目录（默认 `/app/backups`，compose 挂载到宿机 `./backups`）|
@@ -137,6 +138,7 @@ qdrant:
 
 - **密钥隔离**：所有 key 只在服务端 env；`/api/config` 仅下发非敏感信息。
 - **危险操作鉴权**：清空 / 批量蒸馏 / 恢复 三条路径需 `X-Admin-Token` 头，服务端 SHA-256 + `timingSafeEqual` 定长比较。
+- **SSO/OIDC 单点登录（2026-10 新增）**：参照 WeKnora 接入 Keycloak（Authorization Code + PKCE S256，无第三方依赖，纯 node:crypto 验签）。`OIDC_REQUIRED=1` 时除 `/api/config` 与 `/api/auth/*` 外全部 API 需 `Authorization: Bearer`（RS256 JWT：iss/aud/exp + JWKS 签名校验）；未配置 OIDC_* 时行为与历史一致（免鉴权）。会话凭证 = localStorage access_token（与 WeKnora 同模型），前端 401 统一清凭证回登录页。契约详见 CONTRACTS.md §13。
 - **令牌存储**：前端令牌放 `sessionStorage`（会话级，关浏览器即清），降低驻留暴露。
 - **清空防护**：UI 两段式红色确认 + 自动 JSON 快照（保留最近 10 份）+ 误清可一条命令恢复。
 - **路径穿越**：`backup.ts` 读取快照时校验解析后路径仍在 `backups/` 内。
@@ -301,9 +303,9 @@ distinctive-pair 两个高稀有度词
 |---|---|---|
 | 外部 metrics | `distillJob` 状态、Qdrant `/metrics` | 接 Prometheus + Grafana |
 | 多模型路由 | `routes/chat.ts` | 按 question 路由到不同 LLM |
-| 鉴权层 | Hono middleware | 当前仅 ADMIN_TOKEN 守危险操作，普通问答无鉴权；可加 SSO/OIDC 中间件 |
+| ~~鉴权层~~ Hono middleware | ~~可加 SSO/OIDC 中间件~~ | **已落地（2026-10）**：Keycloak OIDC + PKCE，`OIDC_REQUIRED=1` 全 API 强制登录，见 §3.5 与 CONTRACTS.md §13 |
 | 索引并发 | `kbIndex.ts` promise 队列 | 已串行化；扩多副本需换共享索引或 Qdrant 全文 |
-| 增量备份 | `backup.ts` | 当前仅清空前快照；可加定时 cron 备份 |
+| 增量备份 | `backup.ts` | **已落地（2026-10）**：`startBackupTimer` 定时快照 + 手动 `POST /api/kb/backup` |
 | 文档名加权 | `bm25.ts` | 文档名已进索引；可进一步对 docName 命中块加权 |
 | 表格类蒸馏 | `distill.ts` | 对纯表格块改用「提取关键字段」而非「概括知识点」prompt，消化当前 ~3% 失败块 |
 

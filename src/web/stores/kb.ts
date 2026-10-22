@@ -4,6 +4,7 @@
 import { create } from 'zustand';
 import type { DocMeta, KbStats } from '@shared/types.js';
 import { SEED_DOCS } from '@shared/seed.js';
+import { authHeaders, handleUnauthorized } from './auth.js';
 
 export interface ToastMsg {
   id: number;
@@ -62,9 +63,10 @@ const FILES_LIMIT = 500;
 let toastId = 0;
 
 async function api<T>(path: string, init?: RequestInit): Promise<{ ok: boolean; status: number; data: T }> {
-  const res = await fetch(path, init);
+  const res = await fetch(path, { ...init, headers: { ...authHeaders() } });
   let data: any = null;
   try { data = await res.json(); } catch { /* empty body */ }
+  if (res.status === 401) handleUnauthorized();
   return { ok: res.ok, status: res.status, data };
 }
 
@@ -162,9 +164,10 @@ export const useKbStore = create<KbState>((set, get): KbState => ({
     const fd = new FormData();
     fd.append('file', file);
     fd.append('source', 'file');
-    const res = await fetch('/api/kb/docs/upload', { method: 'POST', body: fd });
+    const res = await fetch('/api/kb/docs/upload', { method: 'POST', headers: authHeaders(), body: fd });
     let data: any = null;
     try { data = await res.json(); } catch { /* empty */ }
+    if (res.status === 401) { handleUnauthorized(); return false; }
     if (res.ok) return true;
     if (res.status === 409) get().toast(`已跳过重复文档：${file.name}`);
     else if (res.status === 413) get().toast(`「${file.name}」超过 500MB 上限`, 'err');
@@ -325,6 +328,7 @@ export const useKbStore = create<KbState>((set, get): KbState => ({
       try {
         const dr = await fetch(`/api/kb/docs/${docId}/chunks/${c.index}/distill`, {
           method: 'POST',
+          headers: authHeaders(),
           signal: abort.signal,
         });
         if (!dr.ok) failed++;

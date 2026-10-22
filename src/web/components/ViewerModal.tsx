@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { authHeaders } from '../stores/auth.js';
 
 interface ViewerState {
   open: boolean;
@@ -18,7 +19,7 @@ export function ViewerModal() {
     function onOpen(e: Event) {
       const d = (e as CustomEvent).detail as { docId: string; startLine?: number; endLine?: number };
       void (async () => {
-        const res = await fetch(`/api/kb/docs/${d.docId}`);
+        const res = await fetch(`/api/kb/docs/${d.docId}`, { headers: authHeaders() });
         if (!res.ok) return;
         const doc = await res.json() as { name: string; text: string };
         setState({

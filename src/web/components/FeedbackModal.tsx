@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { authHeaders } from '../stores/auth.js';
 
 interface FbItem {
   id: string;
@@ -23,7 +24,7 @@ export function FeedbackModal() {
 
   useEffect(() => {
     if (!open) return;
-    void fetch('/api/feedback?limit=100').then((r) => r.json()).then((d: any) => {
+    void fetch('/api/feedback?limit=100', { headers: authHeaders() }).then((r) => r.json()).then((d: any) => {
       if (Array.isArray(d?.feedback)) setItems(d.feedback);
     }).catch(() => undefined);
   }, [open]);

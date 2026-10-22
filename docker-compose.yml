@@ -40,6 +40,14 @@ services:
       SEARXNG_URL: "${SEARXNG_URL:-}"
       # ---- 管理员令牌（设了才允许清空知识库）----
       ADMIN_TOKEN: "${ADMIN_TOKEN:-}"
+      # ---- SSO/OIDC 单点登录（Keycloak 等兼容 IdP，可选）----
+      # 配齐 ISSUER/CLIENT_ID/SECRET 才启用；OIDC_REQUIRED=1 强制全部登录
+      OIDC_ISSUER: "${OIDC_ISSUER:-}"
+      OIDC_CLIENT_ID: "${OIDC_CLIENT_ID:-}"
+      OIDC_CLIENT_SECRET: "${OIDC_CLIENT_SECRET:-}"
+      OIDC_REDIRECT_URI: "${OIDC_REDIRECT_URI:-}"
+      OIDC_SCOPE: "${OIDC_SCOPE:-openid profile email}"
+      OIDC_REQUIRED: "${OIDC_REQUIRED:-0}"
       BACKUP_DIR: "/app/backups"
       BACKUP_INTERVAL_MS: "${BACKUP_INTERVAL_MS:-86400000}"
       # ---- 可选：自签 HTTPS（解锁浏览器安全上下文）----

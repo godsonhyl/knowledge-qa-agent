@@ -94,7 +94,18 @@ docker compose
 
 ## 变更记录
 
-## v2.2（2026-10）
+## v2.3（2026-10）
+
+**SSO/OIDC 单点登录（参照 WeKnora，接入企业 Keycloak）**
+- 新增 `src/server/oidc.ts`：Authorization Code + PKCE(S256)，纯 node:crypto 验签（RS256 JWT：iss/aud/exp + JWKS 公钥缓存/轮换），零第三方依赖
+- 新增 `/api/auth/*` 路由：oidc/config、oidc/login（302 Keycloak）、oidc/callback（换 token → 回调页写 localStorage）、refresh、logout
+- `OIDC_REQUIRED=1` 强制鉴权：除 `/api/config`、`/api/auth/*` 外所有 API 需 `Authorization: Bearer`；未配置 OIDC_* 时行为与历史版本一致（免鉴权）
+- 登录页（LoginPage.tsx）参照 WeKnora 布局：左侧品牌展示 + 右侧表单卡，纯 SSO 单按钮；侧栏显示用户名 + 退出
+- 前端全部 fetch 走 `authHeaders()`，401 统一清凭证回登录页
+- 新增 `tests/oidc.test.ts`（8 用例：PKCE/state 一次性消费/jwt 校验/防伪造），总 56 vitest 全绿
+- 契约见 [CONTRACTS.md §13 SSO/OIDC 鉴权契约](./CONTRACTS.md#13-ssooidc-鉴权契约)
+
+### v2.2（2026-10）
 
 **检索/回答/运维全链路优化（10 项）**
 - 父子块检索（small-to-big）：命中子块前后各扩 1 块喂 LLM，引用定位仍用子块行号

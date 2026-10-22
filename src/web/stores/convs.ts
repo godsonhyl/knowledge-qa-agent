@@ -5,6 +5,7 @@
    ask 完成后调 syncToServer 保存消息。
    ============================================================ */
 import { create } from 'zustand';
+import { authHeaders, handleUnauthorized } from './auth.js';
 
 export interface ConvSummary {
   id: string;
@@ -55,9 +56,10 @@ interface ConvState {
 const LS_KEY = 'kqa.convId';
 
 async function api<T>(path: string, init?: RequestInit): Promise<{ ok: boolean; status: number; data: T }> {
-  const res = await fetch(path, init);
+  const res = await fetch(path, { ...init, headers: { ...authHeaders() } });
   let data: any = null;
   try { data = await res.json(); } catch { /* empty */ }
+  if (res.status === 401) handleUnauthorized();
   return { ok: res.ok, status: res.status, data };
 }
 
