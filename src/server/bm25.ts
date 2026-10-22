@@ -119,6 +119,8 @@ export interface IndexedChunk {
   endChar?: number;
   source?: string;
   addedAt?: number;
+  /** 块在文档内的序号（small-to-big 父块合并用） */
+  index?: number;
 }
 
 interface IndexDoc {
@@ -133,6 +135,8 @@ export class BM25Index {
   docs: IndexDoc[] = [];
   df = new Map<string, number>();
   avgLen = 1;
+  /** docId + index → docs 数组位置，供父块（small-to-big）合并用 */
+  private byDocIndex = new Map<string, number>();
 
   constructor(k1 = 1.5, b = 0.72) {
     this.k1 = k1;
@@ -142,6 +146,7 @@ export class BM25Index {
   build(chunks: IndexedChunk[]): this {
     this.docs = [];
     this.df = new Map();
+    this.byDocIndex = new Map();
     let lenSum = 0;
 
     for (const chunk of chunks) {
@@ -155,7 +160,11 @@ export class BM25Index {
       const tf = new Map<string, number>();
       for (const t of tokens) tf.set(t, (tf.get(t) || 0) + 1);
       lenSum += tokens.length || 1;
+      const pos = this.docs.length;
       this.docs.push({ chunk, len: tokens.length || 1, tf });
+      if (chunk.docId != null && chunk.index != null) {
+        this.byDocIndex.set(`${chunk.docId}:${chunk.index}`, pos);
+      }
       for (const t of tf.keys()) this.df.set(t, (this.df.get(t) || 0) + 1);
     }
     this.avgLen = this.docs.length ? lenSum / this.docs.length : 1;
@@ -164,6 +173,47 @@ export class BM25Index {
 
   get N(): number {
     return this.docs.length;
+  }
+
+  /** small-to-big：取 (docId, index) 块及其前后相邻块合并文本。
+   *  用于检索命中后给 LLM 更完整上下文（引用定位仍用子块行号）。 */
+  parentText(docId: string, index: number, window = 1): string {
+    const out: string[] = [];
+    for (let off = -window; off <= window; off++) {
+      const pos = this.byDocIndex.get(`${docId}:${index + off}`);
+      if (pos === undefined) continue;
+      out.push(this.docs[pos]!.chunk.text);
+    }
+    return out.join('\n');
+  }
+
+  /** 增量登记（kbIndex.addDocChunks 用） */
+  registerDocIndex(docId: string, index: number, pos: number): void {
+    this.byDocIndex.set(`${docId}:${index}`, pos);
+  }
+
+  /** 移除一篇文档的全部块并重算 df（kbIndex.removeDocChunks 用）。
+   *  df 从剩余 docs 重算：删除是低频操作，全表重算 O(库 token) 毫秒级。 */
+  removeByDocId(docId: string): void {
+    this.docs = this.docs.filter((d) => d.chunk.docId !== docId);
+    for (const k of [...this.byDocIndex.keys()]) {
+      if (k.startsWith(`${docId}:`)) this.byDocIndex.delete(k);
+    }
+    // byDocIndex 位置因删除发生整体位移，需整表重建
+    this.byDocIndex.clear();
+    this.docs.forEach((d, pos) => {
+      if (d.chunk.docId != null && d.chunk.index != null) {
+        this.byDocIndex.set(`${d.chunk.docId}:${d.chunk.index}`, pos);
+      }
+    });
+    // df / avgLen 重算
+    this.df = new Map();
+    let lenSum = 0;
+    for (const d of this.docs) {
+      for (const t of d.tf.keys()) this.df.set(t, (this.df.get(t) || 0) + 1);
+      lenSum += d.len;
+    }
+    this.avgLen = this.docs.length ? lenSum / this.docs.length : 1;
   }
 
   /** 用给定权重表打分（只统计表里出现过的词） */

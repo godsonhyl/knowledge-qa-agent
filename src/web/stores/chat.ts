@@ -25,6 +25,8 @@ export interface ChatMessage {
   fallback?: boolean;
   /** 联网搜索兜底：SearXNG 命中喂 LLM 的回答，非知识库依据 */
   webAnswer?: boolean;
+  /** 事实直查：命中极强未调 LLM，直接展示片段原文 */
+  direct?: boolean;
   /** 联网搜索命中的来源（title+url，UI 展示） */
   webHits?: { title: string; url: string; content: string }[];
   webSearching?: boolean;
@@ -130,11 +132,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const { sensitivity, topK, retrievalOnly, fallbackOnNoEvidence } = cfg;
     const userMsg: ChatMessage = { id: ++msgId, role: 'user', question };
 
-    // 1. 检索（服务端做）
+    // 1. 检索（服务端做；可带知识库分组）
+    const searchBody: Record<string, unknown> = { question, topK, sensitivity };
+    // 当前选中的分组（如有）
+    const groupSel = (await import('./config.js')).useConfigStore.getState().group;
+    if (groupSel) searchBody.docNamePrefix = groupSel;
     const searchR = await fetch('/api/kb/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question, topK, sensitivity }),
+      body: JSON.stringify(searchBody),
     });
     const search = await searchR.json() as SearchResult;
 
@@ -197,12 +203,35 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return;
     }
 
+    // 2d. 事实直查：命中极强（phraseHit + topScore 很高）→ 跳过 LLM，
+    //     直接把片段文本当答案（零延迟零幻觉，引用定位照常）。
+    //     top1 命中且分数断崖式领先（第 2 名不到一半）才走直查。
+    if (search.directAnswer && search.hits.length) {
+      const top = search.hits[0]!;
+      const second = search.hits[1];
+      const cliffGap = !second || (second.fused < top.fused * 0.5);
+      if (cliffGap) {
+        const text = top.parentText || top.text;
+        const used = new Set<number>([1]);
+        set((s) => ({
+          messages: s.messages.map((m) => m.id === botId
+            ? { ...m, text: `[1] ${text}`, used, streaming: false, direct: true }
+            : m),
+        }));
+        localStorage.setItem(LS_KEY, serialize(get().messages));
+        void get().syncToServer();
+        return;
+      }
+    }
+
     // 3. 构建 evidence prompt，流式调 LLM
     // evidence 块把蒸馏知识点（💡 summary）一并喂给模型：知识点是原文的概念化复述，
-    // 比原文碎片更利于模型组织「是什么/介绍」这类问题的回答。原文 text 仍保留（引用契约）。
+    // 比原文碎片更利于模型组织「是什么/介绍」这类问题的回答。
+    // 父块上下文（parentText）：命中子块前后各扩 1 块合并文本，提供更完整上下文；
+    // 原文 text 仍保留（引用契约），引用定位用子块行号。
     const evidenceBlock = search.hits.map((h, i) => {
       const loc = `${h.docName}${h.section ? ' › ' + h.section : ''}｜第 ${h.startLine}-${h.endLine} 行`;
-      const body = h.summary ? `${h.text}\n（知识点：${h.summary}）` : h.text;
+      const body = h.summary ? `${h.parentText || h.text}\n（知识点：${h.summary}）` : (h.parentText || h.text);
       return `【片段 ${i + 1}】来源：${loc}\n${body}`;
     }).join('\n\n');
     const userPrompt = `「参考片段」如下：\n\n${evidenceBlock}\n\n---\n\n问题：${question}\n\n请严格依据上述片段作答，并为每个结论标注来源编号。如果片段不足，直接说明未找到。`;

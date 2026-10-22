@@ -18,6 +18,7 @@ import {
 import { scrollAll } from '../qdrant.js';
 import { fetchConfluencePage, type ConfPage } from '../confluence.js';
 import { kbIndex } from '../kbIndex.js';
+import { chunkIdFor } from '../ids.js';
 import { distillChunkInto } from '../distill.js';
 import { ENV, llmReady, confluenceReady as confluenceReadyFn } from '../env.js';
 import { writeKbBackup, listKbBackups, readKbBackup, pruneKbBackups } from '../backup.js';
@@ -67,7 +68,16 @@ kb.post('/docs', async (c) => {
   }
   try {
     const r = await kbIndex.run(() => addDoc(body.name, body.text, source, syncMeta));
-    await kbIndex.run(() => kbIndex.rebuild());
+    // 增量更新 BM25 索引（不整库 rebuild）
+    if (r.chunks) {
+      kbIndex.addDocChunks(r.chunks.map((c, i) => ({
+        chunkId: chunkIdFor(r.docId, i),
+        text: c.text, summary: null,
+        docId: r.docId, docName: body.name, section: c.section,
+        startLine: c.startLine, endLine: c.endLine,
+        startChar: c.startChar, endChar: c.endChar, source, index: i,
+      })));
+    }
     return c.json(r, 201);
   } catch (err) {
     return jsonError(c, err);
@@ -167,7 +177,16 @@ kb.post('/docs/upload', async (c) => {
 
   try {
     const r = await kbIndex.run(() => addDoc(savedName, text, source));
-    await kbIndex.run(() => kbIndex.rebuild());
+    // 增量更新 BM25 索引
+    if ((r as any).chunks) {
+      kbIndex.addDocChunks(((r as any).chunks as any[]).map((c, i) => ({
+        chunkId: chunkIdFor(r.docId, i),
+        text: c.text, summary: null,
+        docId: r.docId, docName: savedName, section: c.section,
+        startLine: c.startLine, endLine: c.endLine,
+        startChar: c.startChar, endChar: c.endChar, source, index: i,
+      })));
+    }
     return c.json(r, 201);
   } catch (err) {
     return jsonError(c, err);
@@ -216,7 +235,8 @@ kb.delete('/docs/:docId', async (c) => {
   if (!adminGate(c)) return adminError(c);
   const ok = await removeDoc(c.req.param('docId'));
   if (!ok) return c.json({ error: '文档不存在' }, 404);
-  await kbIndex.run(() => kbIndex.rebuild());
+  // 增量更新索引（不整库重建）
+  kbIndex.removeDocChunks(c.req.param('docId'));
   return c.json({ ok: true });
 });
 
@@ -342,14 +362,40 @@ kb.post('/sync-confluence', async (c) => {
           confluenceVersion: curVer,
           syncedAt: Date.now(),
         }));
-        await kbIndex.run(() => kbIndex.rebuild());
+        // 移除该文档的旧块（BM25 增量；新块在循环外的统一 rebuild 兜底）
+        kbIndex.removeDocChunks(d.id);
         updated++;
       } catch (err) {
         failed++;
         details.push(`${d.payload.name}：${String((err as Error)?.message || err)}`);
       }
     }
+    // 有更新才做一次统一重建（增量移除旧块 + 一次 rebuild 收编新块；
+    // 避免每篇都 rebuild 的 O(N×M) 放大）
+    if (updated > 0) await kbIndex.run(() => kbIndex.rebuild());
     return c.json({ checked, updated, failed, details: details.slice(0, 5) });
+  } catch (err) {
+    return c.json({ error: String((err as Error)?.message || err) }, 500);
+  }
+});
+
+/** GET /api/kb/groups —— 知识库分组列表（按 docName 前缀 + bySource 派生）
+ *  前缀规则：取 docName 中第一个分隔符（/ 或 - 或 _）前的部分作为分组 key。
+ *  用于检索时按范围收窄。 */
+kb.get('/groups', async (c) => {
+  try {
+    const docs = await listDocs();
+    const groups = new Map<string, number>();
+    for (const d of docs) {
+      // 前 2 个字符到分隔符；若无分隔符则整名作 key
+      const m = d.name.match(/^([^\/\-_]+)[\/\-_]/);
+      const key = m ? m[1]! : d.name;
+      groups.set(key, (groups.get(key) || 0) + 1);
+    }
+    const out = [...groups.entries()]
+      .map(([key, count]) => ({ key, label: key, count }))
+      .sort((a, b) => b.count - a.count);
+    return c.json({ groups: out });
   } catch (err) {
     return c.json({ error: String((err as Error)?.message || err) }, 500);
   }

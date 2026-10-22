@@ -12,18 +12,21 @@ interface ConfigState {
   retrievalOnly: boolean;
   /** 无据兜底：检索无依据时让 LLM 用自身知识回答（默认开）。关掉则回到纯拒答。 */
   fallbackOnNoEvidence: boolean;
+  /** 知识库分组（检索范围收窄）；null 表示全部 */
+  group: string | null;
   loadConfig: () => Promise<void>;
   setSensitivity: (v: number) => void;
   setTopK: (v: number) => void;
   setTemperature: (v: number) => void;
   setRetrievalOnly: (v: boolean) => void;
   setFallbackOnNoEvidence: (v: boolean) => void;
+  setGroup: (v: string | null) => void;
   persist: () => void;
 }
 
 const LS_KEY = 'kqa.config.v2';
 
-function loadLocal(): { sensitivity: number; topK: number; temperature: number; retrievalOnly: boolean; fallbackOnNoEvidence: boolean } {
+function loadLocal(): { sensitivity: number; topK: number; temperature: number; retrievalOnly: boolean; fallbackOnNoEvidence: boolean; group: string | null } {
   try {
     const r = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
     return {
@@ -32,9 +35,10 @@ function loadLocal(): { sensitivity: number; topK: number; temperature: number; 
       temperature: typeof r.temperature === 'number' ? r.temperature : 0.2,
       retrievalOnly: Boolean(r.retrievalOnly),
       fallbackOnNoEvidence: typeof r.fallbackOnNoEvidence === 'boolean' ? r.fallbackOnNoEvidence : true,
+      group: typeof r.group === 'string' ? r.group : null,
     };
   } catch {
-    return { sensitivity: 50, topK: 8, temperature: 0.2, retrievalOnly: false, fallbackOnNoEvidence: true };
+    return { sensitivity: 50, topK: 8, temperature: 0.2, retrievalOnly: false, fallbackOnNoEvidence: true, group: null };
   }
 }
 
@@ -55,8 +59,9 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
   setTemperature: (v) => { set({ temperature: v }); get().persist(); },
   setRetrievalOnly: (v) => { set({ retrievalOnly: v }); get().persist(); },
   setFallbackOnNoEvidence: (v) => { set({ fallbackOnNoEvidence: v }); get().persist(); },
+  setGroup: (v) => { set({ group: v }); get().persist(); },
   persist: () => {
-    const { sensitivity, topK, temperature, retrievalOnly, fallbackOnNoEvidence } = get();
-    localStorage.setItem(LS_KEY, JSON.stringify({ sensitivity, topK, temperature, retrievalOnly, fallbackOnNoEvidence }));
+    const { sensitivity, topK, temperature, retrievalOnly, fallbackOnNoEvidence, group } = get();
+    localStorage.setItem(LS_KEY, JSON.stringify({ sensitivity, topK, temperature, retrievalOnly, fallbackOnNoEvidence, group }));
   },
 }));

@@ -61,6 +61,11 @@ export interface Hit {
   };
   /** 向量通道相似度（仅向量命中时存在） */
   sim?: number;
+  /** 命中块在文档内的序号（small-to-big 父块合并用，不进 UI） */
+  chunkIndex?: number;
+  /** 父块上下文：命中的子块在原文里上下各扩 1 块合并的文本（small-to-big 检索）。
+   *  仅为喂 LLM 提供更完整上下文，UI/引用定位仍用上面的 startLine/endLine。 */
+  parentText?: string;
 }
 
 /** POST /api/kb/search 的完整返回 */
@@ -80,6 +85,16 @@ export interface SearchResult {
   topSim: number;
   terms: string[];
   searchMs: number;
+  /** 事实直查：命中极强（phraseHit 且回答就在片段里）时为 true；
+   *  前端跳过 LLM 直接展示片段，零幻觉零延迟。 */
+  directAnswer?: boolean;
+}
+
+/** 知识库分组（用于检索时按范围收窄）。由 docName 前缀或手动 tag 派生。 */
+export interface KbGroup {
+  key: string;
+  label: string;
+  count: number;
 }
 
 export interface ConfigResp {
@@ -111,6 +126,8 @@ export interface ImportResult {
   docId: string;
   chunkCount: number;
   chars: number;
+  /** 切块原始数据（供 BM25 增量索引用；客户端忽略） */
+  chunks?: { id: string; docName: string; section: string; startLine: number; endLine: number; startChar: number; endChar: number; text: string }[];
 }
 
 export interface BulkImportResult {

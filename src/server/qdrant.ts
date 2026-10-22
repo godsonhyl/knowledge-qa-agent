@@ -126,15 +126,30 @@ export async function searchPoints(
   name: string,
   vector: number[],
   limit: number,
+  filter?: Record<string, unknown>,
 ): Promise<{ id: string; score: number; payload: any }[]> {
   const { body } = await qdrantJson<{ result: { id: string; score: number; payload: any }[] }>(
     `/collections/${name}/points/search`,
     {
       method: 'POST',
-      body: JSON.stringify({ vector, limit, with_payload: true }),
+      body: JSON.stringify({ vector, limit, with_payload: true, ...(filter ? { filter } : {}) }),
     },
   );
   return body.result || [];
+}
+
+/** 构造知识库分组过滤条件：按 docName 前缀或 source 收窄向量检索 */
+export function buildGroupFilter(docNamePrefix?: string | null, source?: string | null): Record<string, unknown> | undefined {
+  const must: Record<string, unknown>[] = [];
+  if (docNamePrefix) {
+    // docName 前缀匹配：Qdrant 用 match.prefix（payload 索引为 keyword）
+    must.push({ key: 'docName', match: { prefix: docNamePrefix } });
+  }
+  if (source) {
+    must.push({ key: 'source', match: { value: source } });
+  }
+  if (!must.length) return undefined;
+  return { must };
 }
 
 export async function deleteByFilter(name: string, filter: Record<string, unknown>): Promise<void> {

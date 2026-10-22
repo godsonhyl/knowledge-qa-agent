@@ -124,7 +124,8 @@ export async function addDoc(
   };
   await upsertPoints(COLLECTION_DOCS, [docPoint]);
 
-  return { docId, chunkCount: raw.length, chars: trimmed.length };
+  // 返回 raw chunks 供路由层做 BM25 增量索引（避免全量 rebuild）
+  return { docId, chunkCount: raw.length, chars: trimmed.length, chunks: raw };
 }
 
 export async function bulkAddDocs(docs: { name: string; text: string; source: DocSource }[]): Promise<BulkImportResult> {

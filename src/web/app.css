@@ -331,6 +331,17 @@ b { font-weight: 600; }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .topbar-actions { display: flex; align-items: center; gap: 10px; }
 
+.group-select {
+  padding: 4px 8px; font-size: 12px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--panel-2); color: var(--text-2); cursor: pointer;
+  max-width: 140px;
+}
+.group-select:focus {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
 .chat-scroll { flex: 1; overflow-y: auto; }
 .chat { max-width: 860px; margin: 0 auto; padding: 22px 20px 8px; }
 

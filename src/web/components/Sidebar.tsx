@@ -78,6 +78,7 @@ export function Sidebar() {
         <div className="kb-actions">
           <Button variant="outline" size="small" onClick={() => loadSeed()}>载入示例</Button>
           <Button variant="outline" size="small" onClick={() => window.dispatchEvent(new CustomEvent('open-summary'))}>汇总</Button>
+          <Button variant="outline" size="small" title="查看 👍/👎 反馈汇总（检索调优数据）" onClick={() => window.dispatchEvent(new CustomEvent('open-feedback'))}>反馈</Button>
           {config?.confluence && (
             <Button
               variant="outline"

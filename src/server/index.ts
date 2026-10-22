@@ -13,6 +13,7 @@ import { searchRoute } from './routes/search.js';
 import { webSearch } from './routes/webSearch.js';
 import { conversationsRoute } from './routes/conversations.js';
 import { feedbackRoute } from './routes/feedback.js';
+import { metricsRoute } from './routes/metrics.js';
 import { staticHandler } from './routes/static.js';
 import { certRoute } from './cert.js';
 
@@ -26,6 +27,7 @@ app.route('/api/kb', searchRoute);
 app.route('/api/web-search', webSearch);
 app.route('/api/conversations', conversationsRoute);
 app.route('/api/feedback', feedbackRoute);
+app.route('/api/metrics', metricsRoute);
 app.get('/api/*', (c) => c.json({ error: 'not found' }, 404));
 app.get('*', staticHandler);
 

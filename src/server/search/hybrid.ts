@@ -3,7 +3,7 @@
    ============================================================ */
 import { ENV, embedReady } from '../env.js';
 import { embed } from '../embeddings.js';
-import { searchPoints } from '../qdrant.js';
+import { searchPoints, buildGroupFilter } from '../qdrant.js';
 import { COLLECTION_CHUNKS } from '../kbStore.js';
 import { rerankHits } from '../rerank.js';
 import type { Retriever, LexHit, LexResult } from './retriever.js';
@@ -22,7 +22,7 @@ export interface HybridHit extends Hit {}
 export async function hybridSearch(
   question: string,
   retriever: Retriever,
-  opts: { topK?: number; sensitivity?: number; variants?: string[] },
+  opts: { topK?: number; sensitivity?: number; variants?: string[]; docNamePrefix?: string | null; source?: string | null },
 ): Promise<SearchResult> {
   const topK = opts.topK || 8;
   const sensitivity = typeof opts.sensitivity === 'number' ? opts.sensitivity : 50;
@@ -39,14 +39,16 @@ export async function hybridSearch(
   // 主变体（原问题）的证据门判定为准——变体只扩召回，不放宽证据门
   const lex = lexPerVariant[0]!;
 
-  // ---- 向量通道 ----
+  // ---- 向量通道（带分组过滤时也按 filter 收窄）----
   let vecHits: { chunkId: string; sim: number; payload: any }[] = [];
   let topSim = 0;
   if (embedReady() && ENV.EMBED_VECTOR_GATE) {
     try {
       // 对原问题做向量检索（变体不重复嵌入，避免成本翻倍）
       const [vec] = await embed([question]);
-      const results = await searchPoints(COLLECTION_CHUNKS, vec!, Math.max(topK * 3, 16));
+      // 构造 Qdrant filter：按 docNamePrefix / source 收窄（知识库分组）
+      const filter = buildGroupFilter(opts.docNamePrefix, opts.source);
+      const results = await searchPoints(COLLECTION_CHUNKS, vec!, Math.max(topK * 3, 16), filter);
       vecHits = results.map((r) => ({ chunkId: r.id, sim: r.score, payload: r.payload }));
       topSim = vecHits.length ? vecHits[0]!.sim : 0;
     } catch (err) {
@@ -61,17 +63,20 @@ export async function hybridSearch(
   const reason = lexGate ? lex.reason : (vecGate ? 'vector-sim' : lex.reason);
 
   // ---- RRF 融合（多路词法 + 向量，二次 RRF）----
-  // 词法多路：每个变体的 allScored 都进池，每块取在"任一变体下"的最佳 rank。
+  // 词法多路：每个变体的 allScored 都进池。若指定了分组（docNamePrefix/source），
+  // 在 pool 阶段过滤掉不匹配的块（BM25 本身不支持 payload filter，这里在结果上裁剪）。
   const lexPool: LexHit[] = [];
-  const lexBestRank = new Map<string, number>();  // chunkId → 最佳（最小）rank
+  const lexBestRank = new Map<string, number>();
   lexPerVariant.forEach((lr) => {
     lr.allScored.slice(0, Math.max(topK * 4, 16)).forEach((h, i) => {
+      // 分组过滤（BM25 后置裁剪）
+      if (opts.docNamePrefix && !(h.chunk.docName || '').startsWith(opts.docNamePrefix)) return;
+      if (opts.source && h.chunk.source !== opts.source) return;
       const id = h.chunk.chunkId;
       const r = i + 1;
       const prev = lexBestRank.get(id);
       if (prev === undefined || r < prev) {
         lexBestRank.set(id, r);
-        // 同时确保 pool 里有这条（去重）
         if (!lexPool.some((p) => p.chunk.chunkId === id)) lexPool.push(h);
       }
     });
@@ -113,6 +118,7 @@ export async function hybridSearch(
       endLine: (src.endLine as number) || (lexPayload?.endLine ?? 0),
       startChar: (src.startChar as number) || (lexPayload?.startChar ?? 0),
       endChar: (src.endChar as number) || (lexPayload?.endChar ?? 0),
+      chunkIndex: (src.index as number) ?? (lexPayload?.index ?? -1),
       text: (src.text as string) || lexPayload?.text || '',
       summary: (src.summary as string | null) ?? lexPayload?.summary ?? null,
       fused: Number(f.toFixed(4)),
@@ -144,8 +150,28 @@ export async function hybridSearch(
     // rerank 精排（失败/未配置则退回 RRF 排序，截 topK）
     const { hits: reranked } = await rerankHits(question, pool, topK);
     kept = reranked;
+    // 父块上下文（small-to-big）：取命中子块前后各 1 块合并文本，喂 LLM 用
+    // 引用定位仍用子块 startLine/endLine（契约不动）
+    if (kept.length) {
+      const idx = retriever.index;
+      if (idx) {
+        for (const h of kept) {
+          const ci = (h as any).chunkIndex;
+          if (typeof ci === 'number' && ci >= 0) {
+            h.parentText = idx.parentText(h.docId, ci, 1);
+          }
+        }
+      }
+    }
   }
 
+  // ---- 事实直查：命中极强时标记 directAnswer，前端跳过 LLM 直接展示 ----
+  // 保守条件：词法门 + phraseHit（整词强证据）+ topScore 很高 →
+  // 答案就在片段里，无需 LLM 组织语言（零延迟零幻觉零成本）。
+  const directAnswer = hasEvidence
+    && lex.phraseHit >= 1
+    && lex.topScore >= 18
+    && !!kept.length;
   return {
     hits: kept,
     allScored: all.slice(0, topK),
@@ -160,5 +186,6 @@ export async function hybridSearch(
     topSim: Number(topSim.toFixed(3)),
     terms: lex.terms,
     searchMs: Date.now() - started,
+    directAnswer,
   };
 }

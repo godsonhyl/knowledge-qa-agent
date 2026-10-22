@@ -46,6 +46,7 @@ export function ChatView() {
         <div className="topbar-title">新对话</div>
         <div className="topbar-actions">
           <ThemeToggle />
+          <GroupSelect />
           <label className="switch" title="只做检索、不调用大模型">
             <Switch
               size="small"
@@ -121,6 +122,32 @@ function ThemeToggle() {
   );
 }
 
+/** 知识库分组选择：按 docName 前缀收窄检索范围 */
+function GroupSelect() {
+  const [groups, setGroups] = useState<{ key: string; label: string; count: number }[]>([]);
+  const group = useConfigStore((s) => s.group);
+  const setGroup = useConfigStore((s) => s.setGroup);
+  useEffect(() => {
+    void fetch('/api/kb/groups').then((r) => r.json()).then((d: any) => {
+      if (Array.isArray(d?.groups)) setGroups(d.groups);
+    }).catch(() => undefined);
+  }, []);
+  if (groups.length < 2) return null; // 没分组或单一分组不显示
+  return (
+    <select
+      className="group-select"
+      value={group || ''}
+      onChange={(e) => setGroup(e.target.value || null)}
+      title="按知识库分组收窄检索范围"
+    >
+      <option value="">全部</option>
+      {groups.map((g) => (
+        <option key={g.key} value={g.key}>{g.label}（{g.count}）</option>
+      ))}
+    </select>
+  );
+}
+
 function Welcome() {
   return (
     <div className="welcome">
@@ -167,6 +194,7 @@ function Message({ msg, config }: { msg: ChatMessage; config: ConfigResp | null 
           {noEvidence && !fallbackAnswered && !webAnswered && <Tag theme="danger" variant="light" size="small">未检索到依据</Tag>}
           {fallbackAnswered && <Tag theme="warning" variant="light" size="small">未检索到依据 · 模型兜底</Tag>}
           {webAnswered && <Tag theme="warning" variant="light" size="small">未检索到依据 · 联网搜索兜底</Tag>}
+          {msg.direct && <Tag theme="success" variant="light" size="small">原文直达</Tag>}
           {retrievalOnlyHit && <Tag theme="success" variant="light" size="small">已找到 {msg.hits?.length || 0} 条依据</Tag>}
           {msg.text && !noEvidence && <Tag theme="success" variant="light" size="small">已回答</Tag>}
           {msg.streaming && (
@@ -186,6 +214,11 @@ function Message({ msg, config }: { msg: ChatMessage; config: ConfigResp | null 
           {webAnswered && (
             <div className="notice notice-warn">
               <b>知识库里没有找到相关内容。</b>以下回答基于联网搜索结果（截至搜索时间），非知识库原文依据，请谨慎参考。
+            </div>
+          )}
+          {msg.direct && (
+            <div className="notice notice-info">
+              <b>原文直达</b>：这个问题命中了高置信片段，未调用大模型，直接展示原文（点击 [1] 角标可定位行号）。
             </div>
           )}
           {(noEvidence && !fallbackAnswered && !webAnswered) && <NoEvidence msg={msg} config={config} />}

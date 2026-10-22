@@ -7,6 +7,7 @@ import { ChatView } from './components/ChatView.js';
 import { ViewerModal } from './components/ViewerModal.js';
 import { SummaryModal } from './components/SummaryModal.js';
 import { SettingsModal } from './components/SettingsModal.js';
+import { FeedbackModal } from './components/FeedbackModal.js';
 import { Toast } from './components/Toast.js';
 
 export function App() {
@@ -27,6 +28,7 @@ export function App() {
       <ViewerModal />
       <SummaryModal />
       <SettingsModal />
+      <FeedbackModal />
       <Toast />
     </div>
   );
