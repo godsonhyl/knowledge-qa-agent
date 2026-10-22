@@ -5,7 +5,9 @@ import { Hono } from 'hono';
 import { kbIndex } from '../kbIndex.js';
 import { hybridSearch } from '../search/hybrid.js';
 import { rewriteQuery } from '../queryRewrite.js';
+import { classifyQuestion, mergeHits } from '../multiStep.js';
 import { recordSearch } from './metrics.js';
+import type { SearchResult } from '@shared/types.js';
 
 export const searchRoute = new Hono();
 
@@ -18,14 +20,55 @@ searchRoute.post('/search', async (c) => {
   // 知识库分组（可选）：按 docName 前缀或 source 收窄检索
   const docNamePrefix = typeof body.docNamePrefix === 'string' && body.docNamePrefix ? body.docNamePrefix : null;
   const source = typeof body.source === 'string' && body.source ? body.source : null;
+  const started = Date.now();
 
   // 查询改写：LLM 把问题扩展为多个同义/术语规范化变体；多路检索后用 RRF 二次融合。
   // 失败/超时静默降级为原问题单路检索（不影响主路径可用性）。
   const variants = await rewriteQuery(question, { sensitivity }).catch(() => [question]);
 
-  const r = await kbIndex.run(() => hybridSearch(question, kbIndex.retriever, {
-    topK, sensitivity, variants, docNamePrefix, source,
-  }));
+  // 复杂问题多步检索：LLM 判定复合问题 → 拆子问题 → 各自 hybridSearch → 合并。
+  // 简单问题走 fast path（无额外 LLM 调用）；复合问题额外一次 LLM 调用（2.5s 超时）。
+  const classification = await classifyQuestion(question).catch(() => ({ complex: false, subQuestions: [] as string[] }));
+
+  let r: SearchResult;
+  if (classification.complex && classification.subQuestions.length >= 2) {
+    // 子问题各自检索（带同样的分组过滤 + 改写），合并去重
+    const subResults: SearchResult[] = [];
+    for (const sq of classification.subQuestions) {
+      const sv = await rewriteQuery(sq, { sensitivity }).catch(() => [sq]);
+      const sr = await kbIndex.run(() => hybridSearch(sq, kbIndex.retriever, {
+        topK, sensitivity, variants: sv, docNamePrefix, source,
+      }));
+      subResults.push(sr);
+    }
+    // 合并：把原问题的检索结果也并入（兜底），保证不漏
+    const primary = await kbIndex.run(() => hybridSearch(question, kbIndex.retriever, {
+      topK, sensitivity, variants, docNamePrefix, source,
+    }));
+    subResults.push(primary);
+    const merged = mergeHits(subResults);
+    r = {
+      hits: merged.hits.slice(0, topK),
+      allScored: merged.hits.slice(0, topK),
+      hasEvidence: primary.hasEvidence,
+      reason: primary.reason,
+      coverage: primary.coverage,
+      matchCount: primary.matchCount,
+      termHits: primary.termHits,
+      rarity: primary.rarity,
+      phraseHit: primary.phraseHit,
+      topScore: primary.topScore,
+      topSim: primary.topSim,
+      terms: primary.terms,
+      searchMs: 0, // 后面会替换为累计耗时
+      directAnswer: false, // 复杂问题不走直查
+    };
+    r.searchMs = Date.now() - started;
+  } else {
+    r = await kbIndex.run(() => hybridSearch(question, kbIndex.retriever, {
+      topK, sensitivity, variants, docNamePrefix, source,
+    }));
+  }
   recordSearch(r.searchMs, r.hasEvidence);
   return c.json(r);
 });
