@@ -154,27 +154,23 @@ function Welcome({ config }: { config: ConfigResp | null }) {
   return (
     <div className="welcome">
       <div className="welcome-mark">据</div>
-      <h2>优先依据知识库，知识库覆盖不到时如实说明</h2>
+      <h2>企业知识问答 Agent</h2>
       <p>
-        提问后我会先在知识库里检索片段，再让大模型<b>仅基于检索到的原文</b>作答，每个结论都标出可定位的引用编号 [n]。<br />
-        {webSearch ? (
-          <>检索不到依据时，会<b>明确拒答</b>；你可以手动点「🌐 联网搜索」补充——该回答会醒目标注为非知识库依据，不伪装成有据可循。</>
-        ) : (
-          <><b>检索不到依据时直接拒答</b>，绝不用模型记忆冒充知识库原文。</>
-        )}
+        基于导入的知识库作答，每个结论附可溯源的引用编号 [n]，点击直达原文。<br />
+        知识库无依据时如实拒答{webSearch ? '，支持手动联网搜索补充（醒目标注为非知识库依据）' : ''}，不伪装有据可循。
       </p>
       <div className="welcome-tips">
         <div className="tip">
-          <ChatIcon /><b>有据可循</b>每个结论旁的 [n] 角标对应可定位的原文片段
+          <ChatIcon /><b>溯源引用</b>结论旁的 [n] 对应可定位的原文片段，点击高亮
         </div>
         <div className="tip">
           <FileIcon /><b>混合检索</b>BM25 词法 + bge-m3 向量双通道，RRF 融合精排
         </div>
         <div className="tip">
-          <MapIcon /><b>原文定位</b>点击角标或证据卡，跳转到原文行高亮
+          <MapIcon /><b>原文定位</b>角标与证据卡联动，跳转至原文精确行
         </div>
         <div className="tip">
-          <TipsIcon /><b>拒答不伪装</b>无依据时明确拒答{webSearch ? '，或联网兜底并标注' : '，绝不冒充有据可循'}
+          <TipsIcon /><b>诚实拒答</b>无依据则明确说明{webSearch ? '，可联网兜底并标注来源' : '，不冒充有据可循'}
         </div>
       </div>
     </div>
