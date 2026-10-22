@@ -62,7 +62,7 @@ export function ChatView() {
 
       <div className="chat-scroll" ref={scrollRef}>
         <div className="chat">
-          {messages.length === 0 && <Welcome />}
+          {messages.length === 0 && <Welcome config={config} />}
           {messages.map((m) => (
             <Message key={m.id} msg={m} config={config} />
           ))}
@@ -75,7 +75,7 @@ export function ChatView() {
             ref={taRef}
             rows={1}
             value={input}
-            placeholder="基于知识库提问…（Enter 发送，Shift+Enter 换行）"
+            placeholder="输入问题，优先依据知识库作答…（Enter 发送，Shift+Enter 换行）"
             onChange={(e) => {
               setInput(e.target.value);
               e.target.style.height = 'auto';
@@ -98,7 +98,7 @@ export function ChatView() {
             >提问</Button>
           </div>
         </div>
-        <p className="disclaimer">回答由大模型基于检索片段生成，可能存在误差；请以引用原文为准。</p>
+        <p className="disclaimer">优先依据知识库检索片段作答；知识库无依据时拒答或联网兜底，兜底回答明确标注非知识库依据，请以引用原文为准。</p>
       </div>
     </main>
   );
@@ -149,28 +149,32 @@ function GroupSelect() {
   );
 }
 
-function Welcome() {
+function Welcome({ config }: { config: ConfigResp | null }) {
+  const webSearch = !!config?.webSearch;
   return (
     <div className="welcome">
       <div className="welcome-mark">据</div>
-      <h2>我只根据知识库回答</h2>
+      <h2>优先依据知识库，知识库覆盖不到时如实说明</h2>
       <p>
-        提问后我会先在知识库里检索片段，再让大模型<b>仅基于检索到的原文</b>作答。<br />
-        每个结论都会标出引用编号，点击可定位到原文位置。<br />
-        <b>检索不到依据时，会明确标注后由大模型基于自身知识兜底回答，不会伪装成有据可循。</b>
+        提问后我会先在知识库里检索片段，再让大模型<b>仅基于检索到的原文</b>作答，每个结论都标出可定位的引用编号 [n]。<br />
+        {webSearch ? (
+          <>检索不到依据时，会<b>明确拒答</b>；你可以手动点「🌐 联网搜索」补充——该回答会醒目标注为非知识库依据，不伪装成有据可循。</>
+        ) : (
+          <><b>检索不到依据时直接拒答</b>，绝不用模型记忆冒充知识库原文。</>
+        )}
       </p>
       <div className="welcome-tips">
         <div className="tip">
           <ChatIcon /><b>有据可循</b>每个结论旁的 [n] 角标对应可定位的原文片段
         </div>
         <div className="tip">
-          <FileIcon /><b>混合检索</b>BM25 词法 + bge-m3 向量双通道，RRF 融合
+          <FileIcon /><b>混合检索</b>BM25 词法 + bge-m3 向量双通道，RRF 融合精排
         </div>
         <div className="tip">
           <MapIcon /><b>原文定位</b>点击角标或证据卡，跳转到原文行高亮
         </div>
         <div className="tip">
-          <TipsIcon /><b>拒答不伪装</b>无依据时明确拒答或醒目标注兜底
+          <TipsIcon /><b>拒答不伪装</b>无依据时明确拒答{webSearch ? '，或联网兜底并标注' : '，绝不冒充有据可循'}
         </div>
       </div>
     </div>
