@@ -94,6 +94,15 @@ docker compose
 
 ## 变更记录
 
+## v2.4（2026-10）
+
+**联网搜索兜底增强（方案 A+B）——喂给 LLM 的原料从摘要升级到正文**
+- 方案 A：SearXNG 摘要截断 400→2000 字符，条数上限 6→10，喂给 LLM 更多有效信息
+- 方案 B：配置 `FIRECRAWL_URL` 后，对搜索 Top-3 结果用自托管 Firecrawl `/v2/scrape` 二次抓取页面正文（markdown ≤6000 字符，20s 超时）替换摘要——让模型能看到页面表格/数值而非只有搜索摘要尾巴
+- 抓取失败/超时自动回退摘要，不阻塞；`WebHit.scraped` 标记该条已抓正文
+- `WEB_SEARCH_SYSTEM_PROMPT` 重写：先立口径与公式、数据带时间戳、多期限/多主体用表格（≤6 行）、区分收盘与实时、给可操作查询路径——对齐专业回答规范
+- 新增 `FIRECRAWL_URL` 环境变量（env / docker-compose / .env.example）；契约见 [CONTRACTS.md §10](./CONTRACTS.md#10-联网搜索兜底契约)
+
 ## v2.3（2026-10）
 
 **SSO/OIDC 单点登录 + 本地账号注册（WeKnora 模式：双模式登录）**

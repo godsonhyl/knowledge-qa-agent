@@ -51,6 +51,9 @@ export interface Env {
   /** 联网搜索兜底：自托管 SearXNG 地址（如 http://pypi.jinde.local/searxng）。
    *  未设置 → 拒答页不显示「联网搜索」按钮、API 503。 */
   SEARXNG_URL: string;
+  /** 联网搜索正文抓取：自托管 Firecrawl 地址（如 http://pypi.jinde.local/firecrawl）。
+   *  可选——设置后对搜索命中 Top-N 二次抓取页面正文，喂给 LLM 的不再只是摘要。 */
+  FIRECRAWL_URL: string;
 
   /** 清空知识库的管理员令牌。未设置 → 清空功能完全禁用（按钮隐藏、API 403）。
    *  设置后请求需带 X-Admin-Token 头（UI 侧有登录入口）。 */
@@ -102,6 +105,7 @@ export const ENV: Env = {
   CONFLUENCE_MAX_PAGES: int(process.env.CONFLUENCE_MAX_PAGES, 200),
 
   SEARXNG_URL: (process.env.SEARXNG_URL || '').replace(/\/+$/, ''),
+  FIRECRAWL_URL: (process.env.FIRECRAWL_URL || '').replace(/\/+$/, ''),
 
   ADMIN_TOKEN: process.env.ADMIN_TOKEN || '',
 

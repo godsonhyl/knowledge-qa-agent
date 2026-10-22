@@ -38,6 +38,8 @@ services:
       CONFLUENCE_MAX_PAGES: "${CONFLUENCE_MAX_PAGES:-200}"
       # ---- 联网搜索兜底（SearXNG，拒答后用户主动触发）----
       SEARXNG_URL: "${SEARXNG_URL:-}"
+      # 联网搜索正文抓取（可选）：自托管 Firecrawl，对搜索 Top-N 二次抓页面正文
+      FIRECRAWL_URL: "${FIRECRAWL_URL:-}"
       # ---- 管理员令牌（设了才允许清空知识库）----
       ADMIN_TOKEN: "${ADMIN_TOKEN:-}"
       # ---- SSO/OIDC 单点登录（Keycloak 等兼容 IdP，可选）----

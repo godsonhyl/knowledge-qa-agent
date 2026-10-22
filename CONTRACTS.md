@@ -200,13 +200,14 @@ payload: kind:"doc", name, source, size, addedAt, text
 | **手动触发** | 拒答页「联网搜索」按钮 | 绝不自动联网；用户主动点击才调用。有据可循时此路径不存在 |
 | **不伪装有据** | `WEB_SEARCH_SYSTEM_PROMPT` | 开头强制声明「基于联网搜索结果…未经知识库验证」；全程禁 `[n]`（联网结果不是知识库参考片段） |
 | **UI 三重标识** | 琥珀色徽章「未检索到依据 · 联网搜索兜底」+ 声明横幅 + 独立「联网来源」列表（非证据卡） | 联网来源与知识库证据卡在视觉与结构上完全分开 |
-| **服务端代理** | `POST /api/web-search` | 浏览器不直连 SearXNG；`SEARXNG_URL` 只在服务端 env；返回裁剪后 `{title,url,content}`（title≤200 / url≤500 / content≤400 字符） |
+| **服务端代理** | `POST /api/web-search` | 浏览器不直连 SearXNG；`SEARXNG_URL` 只在服务端 env；返回裁剪后 `{title,url,content,scraped}`（title≤200 / url≤500 / content≤2000 字符摘要） |
+| **正文二次抓取**（v2.4） | `FIRECRAWL_URL` 配置后，对 Top-3 命中调 Firecrawl `/v2/scrape` 抓 markdown 正文（≤6000 字符，20s 超时）替换摘要 | 让 LLM 看到页面表格/数值而非只有搜索摘要；抓取失败/超时回退摘要，不阻塞；`scraped=true` 标记该条已抓正文 |
 | **不污染知识库** | — | 联网结果不进 Qdrant、不进 BM25 索引、不存 chunk；仅存在于该条消息的 `webHits`（localStorage 对话记录） |
 | **空结果诚实** | `empty=true` + `unresponsiveEngines` | 搜不到就明说「联网也没有找到」+ 限流引擎列表，不硬凑 |
 
-**配置**：`SEARXNG_URL`（env / docker-compose）。未设置 → `/api/config` 返回 `webSearch:false`，拒答页不显示按钮，API 503。
+**配置**：`SEARXNG_URL`（必需，env / docker-compose）；`FIRECRAWL_URL`（可选，正文抓取）。未设置 `SEARXNG_URL` → `/api/config` 返回 `webSearch:false`，拒答页不显示按钮，API 503。
 
-**调用链**：拒答 → 用户点按钮 → `POST /api/web-search {q,limit≤10}` → SearXNG `format=json` → 命中裁剪 → 前端拼 webCtx → `callModel(WEB_SEARCH_SYSTEM_PROMPT)` → `validateCitations(ans, 0)`（任何 `[n]` 都判无效，不渲染角标）→ 展示 + 联网来源列表。
+**调用链**：拒答 → 用户点按钮 → `POST /api/web-search {q,limit≤10}` → SearXNG `format=json` → 摘要裁剪 ≤2000 → （若配 `FIRECRAWL_URL`）Top-3 调 `/v2/scrape` 抓正文替换摘要 → 前端拼 webCtx → `callModel(WEB_SEARCH_SYSTEM_PROMPT)`（先立口径/数据带时间戳/多期限用表格/标注局限/给查询路径）→ `validateCitations(ans, 0)`（任何 `[n]` 都判无效，不渲染角标）→ 展示 + 联网来源列表。
 
 ---
 

@@ -126,11 +126,14 @@ export interface ConfigResp {
   sso: SsoConfig;
 }
 
-/** POST /api/web-search 返回的联网命中条目（SearXNG 裁剪后） */
+/** POST /api/web-search 返回的联网命中条目（SearXNG 摘要 + Firecrawl 正文抓取） */
 export interface WebHit {
   title: string;
   url: string;
+  /** 摘要或抓取正文（有正文时为 firecrawl markdown，否则 SearXNG 摘要） */
   content: string;
+  /** 是否成功抓取了页面正文（firecrawl）；false 表示仅有 SearXNG 摘要 */
+  scraped?: boolean;
 }
 
 export interface WebSearchResult {
