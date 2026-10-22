@@ -6,6 +6,7 @@
    失败/超时返回 [原问题]——主路径永不阻塞。
    ============================================================ */
 import { ENV, llmReady } from './env.js';
+import { expandQueryWithSynonyms } from './synonyms.js';
 
 const REWRITE_TIMEOUT_MS = 3500;
 const REWRITE_SYSTEM = `你是一个搜索查询改写器。给定用户的问题，输出 2-3 个**检索变体**，用于在企业知识库里做多路召回。
@@ -21,9 +22,9 @@ export async function rewriteQuery(
   question: string,
   _opts: { sensitivity?: number } = {},
 ): Promise<string[]> {
-  if (!llmReady()) return [question];
-  // 短问题（< 6 字）直接用，不浪费一次 LLM 调用
-  if (question.length < 6) return [question];
+  if (!llmReady()) return withSynonyms(question);
+  // 短问题（< 6 字）直接用词典扩展，不浪费 LLM 调用
+  if (question.length < 6) return withSynonyms(question);
 
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), REWRITE_TIMEOUT_MS);
@@ -46,7 +47,7 @@ export async function rewriteQuery(
       }),
       signal: ctrl.signal,
     });
-    if (!res.ok) return [question];
+    if (!res.ok) return withSynonyms(question);
     const data: any = await res.json().catch(() => null);
     const text: string = data?.choices?.[0]?.message?.content || '';
     const variants = text
@@ -54,7 +55,7 @@ export async function rewriteQuery(
       .map((l) => l.replace(/^[\s•\-\d.、)]+/, '').trim())
       .filter((l) => l && l.length >= 2 && l.length <= 80)
       .slice(0, 3);
-    if (!variants.length) return [question];
+    if (!variants.length) return withSynonyms(question);
     // 去重 + 原问题一定在内（保证主路径召回不变）
     const set = new Set<string>([question, ...variants.map((v) => v.toLowerCase())]);
     const out = [question];
@@ -63,10 +64,16 @@ export async function rewriteQuery(
       if (v.toLowerCase() === question.toLowerCase()) continue;
       out.push(v);
     }
-    return out.slice(0, 4);
+    return withSynonyms(question).concat(out).slice(0, 4);
   } catch {
-    return [question];
+    return withSynonyms(question);
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** 同义词组扩展（不走 LLM，词典直接命中）：
+ *  "交易主干的主备" → 变体 "交易主干的主备 TL"（canonical 词补入） */
+function withSynonyms(question: string): string[] {
+  return [question, ...expandQueryWithSynonyms(question)];
 }

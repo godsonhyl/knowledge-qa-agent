@@ -218,6 +218,14 @@ function Message({ msg, config }: { msg: ChatMessage; config: ConfigResp | null 
           {msg.text && !msg.streaming && !msg.aborted && (
             <AnswerActions msg={msg} />
           )}
+          {!!msg.factIssues?.length && !msg.fallback && !msg.webAnswer && (
+            <div className="notice notice-warn" title="答案中这些数字/IP/版本号在引用片段原文里没有找到，可能是模型转述有出入，请点击角标核对原文">
+              <b>事实核对警告</b>：以下数值在引用原文中未找到依据，请核对：
+              {msg.factIssues.map((f, i) => (
+                <code key={i} style={{ margin: '0 4px' }}>{f}</code>
+              ))}
+            </div>
+          )}
           {msg.aborted && !msg.text && (
             <div className="notice notice-warn">回答被中断，可重新提问。</div>
           )}

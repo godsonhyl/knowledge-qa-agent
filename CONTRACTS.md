@@ -210,7 +210,28 @@ payload: kind:"doc", name, source, size, addedAt, text
 
 ---
 
-## 11. 测试即契约
+## 11. 事实抽验契约
+
+回答生成后（仅正常问答，兜底/联网不适用），前端 `factCheck.ts` 依据 `verifyFacts`（`tests/factCheck.test.ts` §FC-1..4）做启发式核对：
+
+- 抽取答案中的**硬事实**：IP、端口、版本号、≥3 位整数——剔除 `[n]` 引用标记自身。
+- 只在被 `[n]` 引用的片段原文中查找；找不到 → `msg.factIssues` 挂 UI 警告「事实核对警告」。
+- **豁免**（宽松匹配避免误报刷屏）：版本号主段匹配即算支持；<200 的 3-4 位数（常见归纳）豁免；数值去前导零匹配。
+- 最多展示 5 个缺失值；这是提示核对，不自动拒答。
+
+## 12. 检索增强契约（不破坏阈值）
+
+两项增强均**不改** retriever/bm25/chunker 玈阈值，只扩召回面：
+
+| 增强 | 实现 | 失败退路 |
+|---|---|---|
+| 查询改写 | `queryRewrite.ts`：LLM 生成 2-3 变体 + 同义词词典扩展；多路词法融合后与向量做二轮 RRF | LLM 失败/超时 3.5s → `[原问题]+词典` |
+| Reranker | `rerank.ts`：RRF 后取 top-N(`max(topK*3,20)`) → 网关 `/v1/rerank` → 截 topK | 失败/未配置 → 沿用 RRF 排序 |
+| 同义词词典 | `synonyms.ts`：`expandQueryWithSynonyms` 命中 alias → canonical 补入变体；最多 2 组 | 无词典命中 → 无变体 |
+
+证据门以主变体判定为准（变体只扩召回，不放宽门）。
+
+## 13. 测试即契约
 
 | 测试 | 覆盖契约 |
 |---|---|
@@ -218,6 +239,7 @@ payload: kind:"doc", name, source, size, addedAt, text
 | `tests/evidence.test.ts` | **§4（应命中 8 条）§5（应拒答 7 条）字面不变**；§6 拒答不泄露片段；§11 phrase-hit；§12 蒸馏后语义近邻命中 |
 | `tests/confluence.test.ts` | §11 Confluence URL 解析（4 种形式 + 拒绝）+ storage→纯文本 + 引用编号校验 |
 | `tests/pdf.test.ts` | §PDF-1 可解析 PDF 提取原文；§PDF-2 无文字层抛 `PdfNoTextError` |
+| `tests/factCheck.test.ts` | §FC-1 数字在原文无警告；§FC-2 IP 无依据挂警告；§FC-3 版本主段豁免；§FC-4 只看被引用片段 |
 | `scripts/e2e.mjs` | 对运行中的 stack：种子导入 + §4/§5 + 引用偏移往返 + chat SSE 透传 |
 
 **合入门槛**：任何检索层改动前先跑 `npm test`（44 全绿）；UI 改动后跑 `npm run typecheck` + `build`。

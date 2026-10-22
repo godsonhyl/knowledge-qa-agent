@@ -5,6 +5,7 @@ import { create } from 'zustand';
 import type { SearchResult, Hit, WebSearchResult } from '@shared/types.js';
 import { SYSTEM_PROMPT, FALLBACK_SYSTEM_PROMPT, WEB_SEARCH_SYSTEM_PROMPT, REASON_TEXT } from '../qaPrompt.js';
 import { validateCitations } from '../citations.js';
+import { verifyFacts } from '../factCheck.js';
 import { useConvStore } from './convs.js';
 
 export interface ChatMessage {
@@ -27,6 +28,8 @@ export interface ChatMessage {
   /** 联网搜索命中的来源（title+url，UI 展示） */
   webHits?: { title: string; url: string; content: string }[];
   webSearching?: boolean;
+  /** 事实抽验：答案中在引用原文找不到依据的硬事实（数字/IP/版本） */
+  factIssues?: string[];
 }
 
 interface ChatState {
@@ -229,9 +232,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const text = (out || '').trim();
       if (text) {
         const { used } = validateCitations(text, search.hits.length);
+        // 事实抽验：答案中的硬事实（数字/IP/版本）必须在引用原文中可找到
+        const citedTexts = search.hits.map((h) => `${h.docName}\n${h.text}`);
+        const { unsupported } = verifyFacts(text, citedTexts);
         set((s) => ({
           messages: s.messages.map((m) => m.id === botId
-            ? { ...m, text, used, streaming: false }
+            ? { ...m, text, used, streaming: false, factIssues: unsupported.length ? unsupported : undefined }
             : m),
         }));
       } else {
