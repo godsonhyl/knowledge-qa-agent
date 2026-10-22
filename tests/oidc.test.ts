@@ -15,6 +15,7 @@ const TEST_CLIENT = 'kqa-test';
 process.env.OIDC_ISSUER = TEST_ISSUER;
 process.env.OIDC_CLIENT_ID = TEST_CLIENT;
 process.env.OIDC_CLIENT_SECRET = 'sec';
+process.env.OIDC_JWT_SECRET = 'test-jwt-secret-for-local-acct';
 
 // 动态 import 以便 env 在模块加载前生效
 const { createPkceVerifier, pkceChallenge, savePending, takePending, createNonce } = await import('../src/server/oidc.js');
@@ -118,5 +119,72 @@ describe('§OIDC-4 防伪造', () => {
     const { verifyIdToken } = await import('../src/server/oidc.js');
     const token = issueJwt({ iss: TEST_ISSUER, aud: TEST_CLIENT, exp: Math.floor(Date.now() / 1000) + 300 }, 'test-kid', true);
     await expect(verifyIdToken(token)).rejects.toThrow();
+  });
+});
+
+/* ============================================================
+   §LOCAL 本地账号：scrypt 哈希 + HS256 JWT
+   动态 import 以确保 env 在模块加载前生效（同 oidc.js 处理）
+   ============================================================ */
+async function loadUsers() {
+  return await import('../src/server/users.js');
+}
+
+describe('§LOCAL-1 scrypt 密码哈希', () => {
+  it('hashPassword → verifyPassword 往返', async () => {
+    const { hashPassword, verifyPassword } = await loadUsers();
+    const { hash, salt } = hashPassword('P@ssw0rd!');
+    expect(hash).not.toBe('');
+    expect(salt).not.toBe('');
+    expect(verifyPassword('P@ssw0rd!', salt, hash)).toBe(true);
+  });
+  it('错误密码校验失败', async () => {
+    const { hashPassword, verifyPassword } = await loadUsers();
+    const { hash, salt } = hashPassword('correct');
+    expect(verifyPassword('wrong', salt, hash)).toBe(false);
+  });
+  it('相同密码每次 salt 不同（防彩虹表）', async () => {
+    const { hashPassword } = await loadUsers();
+    const a = hashPassword('same');
+    const b = hashPassword('same');
+    expect(a.salt).not.toBe(b.salt);
+    expect(a.hash).not.toBe(b.hash);
+  });
+});
+
+describe('§LOCAL-2 HS256 JWT 签发/校验', () => {
+  it('合法 token 校验通过', async () => {
+    const { signLocalJwt, verifyLocalJwt, isLocalJwt } = await loadUsers();
+    const token = signLocalJwt({
+      type: 'access', sub: 'u@jinde.local', email: 'u@jinde.local',
+      name: '测试', username: 'u', roles: ['user'], source: 'local',
+    });
+    expect(isLocalJwt(token)).toBe(true);
+    const claims = verifyLocalJwt(token);
+    expect(claims.sub).toBe('u@jinde.local');
+    expect(claims.email).toBe('u@jinde.local');
+    expect(claims.roles).toEqual(['user']);
+    expect(claims.iss).toBe('kqa');
+  });
+  it('过期 token 拒绝', async () => {
+    const { signLocalJwt, verifyLocalJwt } = await loadUsers();
+    const token = signLocalJwt({
+      type: 'access', sub: 'x', email: 'x', name: 'x', username: 'x', roles: [], source: 'local', ttl: -10,
+    });
+    expect(() => verifyLocalJwt(token)).toThrow();
+  });
+  it('签名篡改拒绝', async () => {
+    const { signLocalJwt, verifyLocalJwt } = await loadUsers();
+    const token = signLocalJwt({
+      type: 'access', sub: 'x', email: 'x', name: 'x', username: 'x', roles: [], source: 'local',
+    });
+    const tampered = token.slice(0, -2) + 'AA';
+    expect(() => verifyLocalJwt(tampered)).toThrow();
+  });
+  it('isLocalJwt 识别 RS256 token 返回 false', async () => {
+    const { isLocalJwt } = await loadUsers();
+    // 用 OIDC 测试里签的 RS256 token（alg=RS256）
+    const rs = issueJwt({ iss: TEST_ISSUER, aud: TEST_CLIENT, exp: Math.floor(Date.now() / 1000) + 300 });
+    expect(isLocalJwt(rs)).toBe(false);
   });
 });

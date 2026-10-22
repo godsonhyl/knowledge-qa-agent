@@ -4,7 +4,7 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { serve } from '@hono/node-server';
-import { ENV, configResp, llmReady, oidcReady } from './env.js';
+import { ENV, configResp, llmReady, oidcReady, localAuthReady } from './env.js';
 import { kbIndex } from './kbIndex.js';
 import { startBackupTimer } from './backup.js';
 import { kb } from './routes/kb.js';
@@ -18,6 +18,7 @@ import { feedbackRoute } from './routes/feedback.js';
 import { metricsRoute } from './routes/metrics.js';
 import { authRoute } from './routes/auth.js';
 import { verifyAccessToken } from './oidc.js';
+import { verifyLocalJwt, isLocalJwt } from './users.js';
 import { staticHandler } from './routes/static.js';
 import { certRoute } from './cert.js';
 
@@ -30,22 +31,34 @@ const PUBLIC_PREFIXES = ['/api/config', '/api/auth'];
 async function authMiddleware(c: Context, next: () => Promise<void>): Promise<void | Response> {
   const path = new URL(c.req.url).pathname;
   if (PUBLIC_PREFIXES.some((p) => path === p || path.startsWith(p + '/'))) return next();
-  if (!oidcReady()) return next();           // 未配置 OIDC → 行为同现状
+  const authOn = oidcReady() || localAuthReady();
+  if (!authOn) return next();           // 未配置任何鉴权 → 行为同现状
   const required = ENV.OIDC_REQUIRED;
   const auth = c.req.header('Authorization') || '';
   const bearer = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
   if (bearer) {
     try {
-      const claims = await verifyAccessToken(bearer);
-      // 注入用户信息到 context（routes 可选读取）
-      c.set('ssoUser', {
-        sub: claims.sub || '',
-        name: claims.name || claims.preferred_username || claims.email || '',
-        email: claims.email || '',
-        username: claims.preferred_username || claims.email || claims.sub || '',
-        // realm 角色（Keycloak access_token 在 realm_access.roles）；管理员判定用
-        roles: Array.isArray((claims as any).realm_access?.roles) ? (claims as any).realm_access.roles : [],
-      });
+      // 双 token：本地 HS256（我们签）或 OIDC RS256（Keycloak 签）
+      if (isLocalJwt(bearer)) {
+        const claims = verifyLocalJwt(bearer);
+        c.set('ssoUser', {
+          sub: claims.sub,
+          name: claims.name,
+          email: claims.email,
+          username: claims.username,
+          roles: claims.roles || [],
+        });
+      } else {
+        const claims = await verifyAccessToken(bearer);
+        c.set('ssoUser', {
+          sub: claims.sub || '',
+          name: claims.name || claims.preferred_username || claims.email || '',
+          email: claims.email || '',
+          username: claims.preferred_username || claims.email || claims.sub || '',
+          // realm 角色（Keycloak access_token 在 realm_access.roles）；管理员判定用
+          roles: Array.isArray((claims as any).realm_access?.roles) ? (claims as any).realm_access.roles : [],
+        });
+      }
       return next();
     } catch (err) {
       // token 无效：若强制鉴权 → 401；否则放行（降级为匿名，与 =0 行为一致）
@@ -55,11 +68,11 @@ async function authMiddleware(c: Context, next: () => Promise<void>): Promise<vo
   }
   // 无 token
   if (!required) return next();
-  // API 请求 → 401；浏览器导航（Accept: text/html）→ 跳登录
+  // API 请求 → 401；浏览器导航（Accept: text/html）→ 跳登录页（前端 LoginPage 处理两种模式）
   if (c.req.header('Accept')?.includes('text/html')) {
-    return c.redirect('/api/auth/oidc/login', 302);
+    return c.redirect('/', 302);
   }
-  return c.json({ error: '未登录', loginUrl: '/api/auth/oidc/login' }, 401);
+  return c.json({ error: '未登录' }, 401);
 }
 
 app.use('/api/*', authMiddleware);
@@ -101,9 +114,9 @@ async function main() {
       ? `${ENV.EMBED_MODEL} ${ENV.EMBED_DIM}维（向量门 ${ENV.EMBED_VECTOR_GATE ? '开' : '关'}）`
       : '未配置'}`);
     console.log(`[Qdrant] ${ENV.QDRANT_URL} · ${ENV.COLLECTION_CHUNKS}/${ENV.COLLECTION_DOCS}`);
-    console.log(`[SSO/OIDC] ${oidcReady()
-      ? `${ENV.OIDC_ISSUER}（client ${ENV.OIDC_CLIENT_ID}，${ENV.OIDC_REQUIRED ? '强制鉴权' : '可选登录'}）`
-      : '未配置。设置 OIDC_* 启用单点登录'}`);
+    console.log(`[SSO/OIDC] ${oidcReady() || localAuthReady()
+      ? `OIDC=${oidcReady() ? ENV.OIDC_ISSUER : '关'} · 本地账号=${localAuthReady() ? '开' : '关'}（${ENV.OIDC_REQUIRED ? '强制鉴权' : '可选登录'}）`
+      : '未配置。设置 OIDC_* 启用 SSO，或 OIDC_JWT_SECRET 启用本地账号'}`);
     // 定时备份（默认 24h，设 0 关闭；存于 BACKUP_DIR，自动 prune 10 份）
     if (ENV.BACKUP_INTERVAL_MS > 0) {
       startBackupTimer(ENV.BACKUP_INTERVAL_MS);

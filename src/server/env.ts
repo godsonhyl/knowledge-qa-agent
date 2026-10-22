@@ -66,6 +66,9 @@ export interface Env {
   OIDC_SCOPE: string;
   /** 1 = 强制鉴权（全部需登录）；0 = 可选（登录入口可见但不强制）。默认 0 */
   OIDC_REQUIRED: boolean;
+  /** 本地账号模式 HMAC 密钥（HS256 JWT 签发/校验）。配了才启用本地注册/登录。
+   *  与 OIDC_* 互不依赖：可只配此项（纯本地账号）、只配 OIDC_*（纯 SSO）、或都配（双模式）。 */
+  OIDC_JWT_SECRET: string;
 }
 
 export const ENV: Env = {
@@ -108,6 +111,7 @@ export const ENV: Env = {
   OIDC_REDIRECT_URI: (process.env.OIDC_REDIRECT_URI || '').replace(/\/+$/, ''),
   OIDC_SCOPE: process.env.OIDC_SCOPE || 'openid profile email',
   OIDC_REQUIRED: bool(process.env.OIDC_REQUIRED, false),
+  OIDC_JWT_SECRET: process.env.OIDC_JWT_SECRET || '',
 };
 
 export function llmReady(): boolean {
@@ -124,6 +128,10 @@ export function webSearchReady(): boolean {
 }
 export function oidcReady(): boolean {
   return Boolean(ENV.OIDC_ISSUER && ENV.OIDC_CLIENT_ID && ENV.OIDC_CLIENT_SECRET);
+}
+/** 本地账号模式：配了 OIDC_JWT_SECRET 才启用注册/密码登录 */
+export function localAuthReady(): boolean {
+  return Boolean(ENV.OIDC_JWT_SECRET);
 }
 export function rerankReady(): boolean {
   return Boolean(ENV.RERANK_MODEL && ENV.EMBED_BASE_URL);
@@ -152,9 +160,13 @@ export function configResp() {
     /** SSO/OIDC 鉴权配置（仅下发登录入口与开关，绝不下发 secret） */
     sso: {
       enabled: oidcReady(),
-      required: oidcReady() && ENV.OIDC_REQUIRED,
+      required: (oidcReady() || localAuthReady()) && ENV.OIDC_REQUIRED,
       providerName: 'SSO 登录',
       loginUrl: '/api/auth/oidc/login',
+      /** 本地账号注册/密码登录是否启用（配了 OIDC_JWT_SECRET） */
+      localEnabled: localAuthReady(),
+      /** 开放注册：localAuthReady() 即开 */
+      registrationEnabled: localAuthReady(),
     },
   };
 }

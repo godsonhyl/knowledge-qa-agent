@@ -106,6 +106,10 @@ export interface SsoConfig {
   providerName: string;
   /** 登录入口：浏览器 GET 此地址即跳 Keycloak authorize */
   loginUrl: string;
+  /** 本地账号注册/密码登录是否启用（配了 OIDC_JWT_SECRET） */
+  localEnabled: boolean;
+  /** 开放注册：localEnabled 即开 */
+  registrationEnabled: boolean;
 }
 
 export interface ConfigResp {

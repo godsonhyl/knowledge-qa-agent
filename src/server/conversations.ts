@@ -37,6 +37,8 @@ export interface ConvPayload {
   messages: ConvMessage[];
   /** 是否置顶 */
   pinned?: boolean;
+  /** 所有者（OIDC sub 或本地账号 email）；OIDC_REQUIRED=0 时为空（共享） */
+  ownerSub?: string;
 }
 
 const MAX_MSGS_KEEP = 50;
@@ -46,7 +48,7 @@ export async function ensureConvCollection(): Promise<void> {
 }
 
 /** 新建对话（返回 id） */
-export async function createConv(title: string): Promise<string> {
+export async function createConv(title: string, ownerSub?: string): Promise<string> {
   const id = uuidv4();
   const now = Date.now();
   const payload: ConvPayload = {
@@ -55,14 +57,17 @@ export async function createConv(title: string): Promise<string> {
     createdAt: now,
     updatedAt: now,
     messages: [],
+    ownerSub,
   };
   await upsertPoints(COLLECTION_CONVS, [{ id, vector: [0], payload: payload as any }]);
   return id;
 }
 
-/** 列表（按 updatedAt 倒序，pinned 在前） */
-export async function listConvs(): Promise<{ id: string; payload: ConvPayload }[]> {
-  const pts = await scrollAll<ConvPayload>(COLLECTION_CONVS, null, ['kind', 'title', 'createdAt', 'updatedAt', 'pinned']);
+/** 列表（按 updatedAt 倒序，pinned 在前）。
+ *  ownerSub 非空时按所有者过滤（OIDC_REQUIRED 模式下隔离对话历史）。 */
+export async function listConvs(ownerSub?: string): Promise<{ id: string; payload: ConvPayload }[]> {
+  const filter = ownerSub ? { must: [{ key: 'ownerSub', match: { value: ownerSub } }] } : null;
+  const pts = await scrollAll<ConvPayload>(COLLECTION_CONVS, filter, ['kind', 'title', 'createdAt', 'updatedAt', 'pinned', 'ownerSub']);
   const out = pts.map((p) => ({ id: p.id, payload: p.payload as ConvPayload }));
   out.sort((a, b) => {
     const pa = a.payload.pinned ? 1 : 0;

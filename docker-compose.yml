@@ -48,6 +48,8 @@ services:
       OIDC_REDIRECT_URI: "${OIDC_REDIRECT_URI:-}"
       OIDC_SCOPE: "${OIDC_SCOPE:-openid profile email}"
       OIDC_REQUIRED: "${OIDC_REQUIRED:-0}"
+      # 本地账号模式（与 OIDC_* 互不依赖；配了即启用注册/密码登录）
+      OIDC_JWT_SECRET: "${OIDC_JWT_SECRET:-}"
       BACKUP_DIR: "/app/backups"
       BACKUP_INTERVAL_MS: "${BACKUP_INTERVAL_MS:-86400000}"
       # ---- 可选：自签 HTTPS（解锁浏览器安全上下文）----

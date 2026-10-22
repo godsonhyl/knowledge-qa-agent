@@ -4,23 +4,91 @@
    ============================================================ */
 import { Hono } from 'hono';
 import type { Context } from 'hono';
-import { ENV, oidcReady } from '../env.js';
+import { ENV, oidcReady, localAuthReady } from '../env.js';
 import {
   buildAuthUrl, createNonce, createPkceVerifier, exchangeCode, savePending, takePending,
   verifyIdToken, verifyAccessToken, refreshAccessToken, endSessionUrl, userFromClaims, fetchUserinfo,
   type SsoUser, type JwtClaims,
 } from '../oidc.js';
+import {
+  ensureUsersCollection, findUserByEmail, findUserByOidcSub, createUser, touchLogin,
+  hashPassword, verifyPassword, isValidEmail, signLocalJwt, verifyLocalJwt, isLocalJwt,
+  type UserPayload,
+} from '../users.js';
 
 export const authRoute = new Hono();
 
 /** GET /api/auth/oidc/config —— 登录页探测（与 WeKnora 对齐） */
 authRoute.get('/oidc/config', (c) => {
   const enabled = oidcReady();
+  const localEnabled = localAuthReady();
   return c.json({
     success: true,
     enabled,
+    localEnabled,
+    registrationEnabled: localEnabled,
     provider_display_name: ENV.OIDC_REQUIRED ? 'SSO 登录' : 'SSO 登录（可选）',
   });
+});
+
+/* ---------- 把内部 UserPayload 转成前端 SsoUser ---------- */
+function toFrontUser(u: UserPayload): SsoUser {
+  return {
+    sub: u.oidcSub || u.email,
+    name: u.name || u.username || u.email,
+    email: u.email,
+    username: u.username || u.email,
+  };
+}
+
+/* ---------- 本地账号：注册 ---------- */
+/** POST /api/auth/register {email, password, name?} → {token, refreshToken, user} */
+authRoute.post('/register', async (c) => {
+  if (!localAuthReady()) return c.json({ error: '本地账号未启用：服务端需设置 OIDC_JWT_SECRET' }, 503);
+  await ensureUsersCollection();
+  let body: any;
+  try { body = await c.req.json(); } catch { body = {}; }
+  const email = String(body?.email || '').trim();
+  const password = String(body?.password || '');
+  const name = String(body?.name || '').trim();
+  if (!isValidEmail(email)) return c.json({ error: '邮箱格式不正确' }, 400);
+  if (password.length < 6) return c.json({ error: '密码至少 6 位' }, 400);
+  if (await findUserByEmail(email)) return c.json({ error: '该邮箱已注册' }, 409);
+  const { hash, salt } = hashPassword(password);
+  const username = name || email.split('@')[0]!;
+  const { payload } = await createUser({
+    email, username, name: name || username,
+    passwordHash: hash, passwordSalt: salt,
+    roles: ['user'], source: 'local',
+  });
+  const frontUser = toFrontUser(payload);
+  const token = signLocalJwt({ type: 'access', sub: payload.email, email: payload.email, name: payload.name, username: payload.username, roles: payload.roles, source: 'local' });
+  const refreshToken = signLocalJwt({ type: 'refresh', sub: payload.email, email: payload.email, name: payload.name, username: payload.username, roles: payload.roles, source: 'local' });
+  return c.json({ success: true, token, refreshToken, user: frontUser }, 201);
+});
+
+/* ---------- 本地账号：登录 ---------- */
+/** POST /api/auth/login {email, password} → {token, refreshToken, user} */
+authRoute.post('/login', async (c) => {
+  if (!localAuthReady()) return c.json({ error: '本地账号未启用：服务端需设置 OIDC_JWT_SECRET' }, 503);
+  await ensureUsersCollection();
+  let body: any;
+  try { body = await c.req.json(); } catch { body = {}; }
+  const email = String(body?.email || '').trim().toLowerCase();
+  const password = String(body?.password || '');
+  if (!email || !password) return c.json({ error: '邮箱和密码不能为空' }, 400);
+  const found = await findUserByEmail(email);
+  if (!found || !found.payload.passwordHash || !found.payload.passwordSalt) {
+    return c.json({ error: '邮箱或密码错误' }, 401);
+  }
+  if (!verifyPassword(password, found.payload.passwordSalt, found.payload.passwordHash)) {
+    return c.json({ error: '邮箱或密码错误' }, 401);
+  }
+  await touchLogin(found.id, found.payload);
+  const frontUser = toFrontUser(found.payload);
+  const token = signLocalJwt({ type: 'access', sub: found.payload.email, email: found.payload.email, name: found.payload.name, username: found.payload.username, roles: found.payload.roles, source: 'local' });
+  const refreshToken = signLocalJwt({ type: 'refresh', sub: found.payload.email, email: found.payload.email, name: found.payload.name, username: found.payload.username, roles: found.payload.roles, source: 'local' });
+  return c.json({ success: true, token, refreshToken, user: frontUser });
 });
 
 /** GET /api/auth/oidc/login —— 生成 state+PKCE，302 到 Keycloak authorize */
@@ -75,6 +143,22 @@ authRoute.get('/oidc/callback', async (c) => {
         if (Array.isArray(r)) roles = r.filter((x: unknown) => typeof x === 'string');
       } catch { /* access_token 验签失败不阻断登录（id_token 已验过） */ }
     }
+    // OIDC 首次登录落库（kqa_users source=oidc）；再次登录只 touchLogin
+    if (user?.sub) {
+      try {
+        const existing = await findUserByOidcSub(user.sub);
+        if (existing) {
+          existing.payload.roles = roles.length ? roles : existing.payload.roles;
+          existing.payload.lastLoginAt = Date.now();
+          await touchLogin(existing.id, existing.payload);
+        } else if (user.email) {
+          await createUser({
+            email: user.email, username: user.username, name: user.name,
+            roles: roles.length ? roles : ['user'], source: 'oidc', oidcSub: user.sub,
+          });
+        }
+      } catch { /* 落库失败不阻断登录 */ }
+    }
     return injectTokensPage(c, tokens, user, roles);
   } catch (err) {
     return errorPage(c, `登录失败：${(err as Error).message}`);
@@ -82,13 +166,18 @@ authRoute.get('/oidc/callback', async (c) => {
 });
 
 /** GET /api/auth/me —— 当前登录用户信息（前端探针用；未登录返回 401）。
- *  与 Flask demo 的 g.user 对齐：返回 sub/name/email/username/roles。 */
+ *  与 Flask demo 的 g.user 对齐：返回 sub/name/email/username/roles。
+ *  兼容两种 token：OIDC 的 RS256（Keycloak 签）与本地 HS256（我们签）。 */
 authRoute.get('/me', async (c) => {
-  if (!oidcReady()) return c.json({ error: 'OIDC 未配置' }, 503);
+  if (!oidcReady() && !localAuthReady()) return c.json({ error: '鉴权未配置' }, 503);
   const auth = c.req.header('Authorization') || '';
   const bearer = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
   if (!bearer) return c.json({ error: '未登录' }, 401);
   try {
+    if (isLocalJwt(bearer)) {
+      const claims = verifyLocalJwt(bearer);
+      return c.json({ success: true, user: { sub: claims.sub, name: claims.name, email: claims.email, username: claims.username, roles: claims.roles } });
+    }
     const claims = await verifyAccessToken(bearer);
     const r = (claims as any)?.realm_access?.roles;
     const roles = Array.isArray(r) ? r.filter((x: unknown) => typeof x === 'string') : [];
@@ -98,14 +187,25 @@ authRoute.get('/me', async (c) => {
   }
 });
 
-/** POST /api/auth/refresh —— 用 refresh_token 续期 {refreshToken} → {token, refreshToken?} */
+/** POST /api/auth/refresh —— 用 refresh_token 续期 {refreshToken} → {token, refreshToken?}
+ *  兼容两种 token：OIDC refresh_token（RS256，转 Keycloak 换）与本地 HS256 refresh（重签） */
 authRoute.post('/refresh', async (c) => {
-  if (!oidcReady()) return c.json({ error: 'OIDC 未配置' }, 503);
+  if (!oidcReady() && !localAuthReady()) return c.json({ error: '鉴权未配置' }, 503);
   let body: any;
   try { body = await c.req.json(); } catch { body = {}; }
   const rt = String(body?.refreshToken || '');
   if (!rt) return c.json({ error: '缺少 refreshToken' }, 400);
   try {
+    // 本地 refresh_token（HS256）：重签 access + refresh
+    if (isLocalJwt(rt)) {
+      const claims = verifyLocalJwt(rt);
+      if (claims.type !== 'refresh') return c.json({ success: false, error: '非 refresh token' }, 401);
+      const token = signLocalJwt({ type: 'access', sub: claims.sub, email: claims.email, name: claims.name, username: claims.username, roles: claims.roles, source: claims.source });
+      const refreshToken = signLocalJwt({ type: 'refresh', sub: claims.sub, email: claims.email, name: claims.name, username: claims.username, roles: claims.roles, source: claims.source });
+      return c.json({ success: true, token, refreshToken });
+    }
+    // OIDC refresh_token：转 Keycloak 换
+    if (!oidcReady()) return c.json({ success: false, error: 'OIDC 未配置' }, 503);
     const tokens = await refreshAccessToken(rt);
     return c.json({
       success: true,

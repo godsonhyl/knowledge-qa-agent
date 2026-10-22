@@ -115,6 +115,7 @@ docker compose up -d
 | `CONFLUENCE_MAX_PAGES` | | 子树导入上限（默认 200，现网设 10000）|
 | `ADMIN_TOKEN` | | **管理员令牌**：设了才允许清空/批量蒸馏/恢复；不设则全部禁用 |
 | `OIDC_ISSUER` / `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | | **SSO/OIDC 单点登录**（Keycloak）：配齐三 个才启用；`OIDC_REDIRECT_URI` 填回调地址、`OIDC_REQUIRED=1` 强制全部登录。未配置 → 所有 API 免鉴权（历史行为）|
+| `OIDC_JWT_SECRET` | | **本地账号模式**：配了即启用用户注册 + 邮箱密码登录（scrypt 哈希 + HS256 JWT）。与 OIDC_* 独立，可单开或双模式 |
 | `GEN_CERT` / `HTTPS_PORT` | | 自签 HTTPS（解锁浏览器安全上下文）|
 | `HOST_PORT` / `HTTPS_HOST_PORT` | | 宿主映射（默认 3002 / 3443）|
 | `BACKUP_DIR` | | 快照目录（默认 `/app/backups`，compose 挂载到宿机 `./backups`）|
@@ -138,7 +139,7 @@ qdrant:
 
 - **密钥隔离**：所有 key 只在服务端 env；`/api/config` 仅下发非敏感信息。
 - **危险操作鉴权**：清空 / 批量蒸馏 / 恢复 三条路径需 `X-Admin-Token` 头，服务端 SHA-256 + `timingSafeEqual` 定长比较。
-- **SSO/OIDC 单点登录（2026-10 新增）**：参照 WeKnora 接入 Keycloak（Authorization Code + PKCE S256，无第三方依赖，纯 node:crypto 验签）。`OIDC_REQUIRED=1` 时除 `/api/config` 与 `/api/auth/*` 外全部 API 需 `Authorization: Bearer`（RS256 JWT：iss/aud/exp + JWKS 签名校验）；未配置 OIDC_* 时行为与历史一致（免鉴权）。会话凭证 = localStorage access_token（与 WeKnora 同模型），前端 401 统一清凭证回登录页。契约详见 CONTRACTS.md §13。
+- **SSO/OIDC + 本地账号双模式（2026-10）**：WeKnora 式登录页 = SSO 按钮（OIDC：Authorization Code + PKCE S256）+ 邮箱密码表单/注册（本地账号：scrypt 哈希 + HS256 JWT）。`OIDC_*` 与 `OIDC_JWT_SECRET` 独立配置，按需单开或并存；middleware 按 header.alg 分流（RS256→JWKS 验签 / HS256→HMAC 校验）。`OIDC_REQUIRED=1` 时所有受保护 API 需 `Authorization: Bearer`，对话历史按 ownerSub 隔离；未配置任何鉴权时行为与历史一致（免鉴权）。JWT_SECRET 是 HMAC 密钥，**绝不下发前端**；明文密码永不落库/日志。契约详见 CONTRACTS.md §13。
 - **令牌存储**：前端令牌放 `sessionStorage`（会话级，关浏览器即清），降低驻留暴露。
 - **清空防护**：UI 两段式红色确认 + 自动 JSON 快照（保留最近 10 份）+ 误清可一条命令恢复。
 - **路径穿越**：`backup.ts` 读取快照时校验解析后路径仍在 `backups/` 内。

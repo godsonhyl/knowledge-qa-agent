@@ -61,6 +61,9 @@ export async function ensureCollections(): Promise<void> {
   }
   // 对话历史 collection（伪向量 size 1，payload 存消息列表）
   await ensureCollection(COLLECTION_CONVS, 1);
+  // 用户表 collection（本地账号 + OIDC 首次登录落库）
+  const { ensureUsersCollection } = await import('./users.js');
+  await ensureUsersCollection();
 }
 
 /** 按名字查文档（去重检查用） */

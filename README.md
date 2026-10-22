@@ -96,14 +96,14 @@ docker compose
 
 ## v2.3（2026-10）
 
-**SSO/OIDC 单点登录（参照 WeKnora，接入企业 Keycloak）**
+**SSO/OIDC 单点登录 + 本地账号注册（WeKnora 模式：双模式登录）**
 - 新增 `src/server/oidc.ts`：Authorization Code + PKCE(S256)，纯 node:crypto 验签（RS256 JWT：iss/aud/exp + JWKS 公钥缓存/轮换），零第三方依赖
-- 新增 `/api/auth/*` 路由：oidc/config、oidc/login（302 Keycloak）、oidc/callback（换 token → 回调页写 localStorage）、me、refresh、logout
-- 参照 GitLab wiki `oidc-demo-flask` 示例：无 id_token 时回退 userinfo 端点取用户信息；access_token 的 `realm_access.roles` 含 `admin` 的登录用户可免 ADMIN_TOKEN 执行清空/批量蒸馏/恢复（对齐 demo 的 `@roles_required('admin')`）；API 401 先静默 refresh 续期再回登录页
-- `OIDC_REQUIRED=1` 强制鉴权：除 `/api/config`、`/api/auth/*` 外所有 API 需 `Authorization: Bearer`；未配置 OIDC_* 时行为与历史版本一致（免鉴权）
-- 登录页（LoginPage.tsx）参照 WeKnora 布局：左侧品牌展示 + 右侧表单卡，纯 SSO 单按钮；侧栏显示用户名 + 退出
-- 前端全部 fetch 走 `authHeaders()`，401 统一清凭证回登录页
-- 新增 `tests/oidc.test.ts`（8 用例：PKCE/state 一次性消费/jwt 校验/防伪造），总 56 vitest 全绿
+- 新增 `src/server/users.ts` + `kqa_users` collection（Qdrant）：本地账号注册（scrypt 密码哈希 + 16 字节 salt）、登录签发 HS256 JWT（access 8h / refresh 30d）；OIDC 首次登录自动建号（source=oidc）
+- `/api/auth/*` 路由：oidc/config、oidc/login（302 Keycloak）、oidc/callback、register、login、me、refresh、logout；middleware 按 header.alg 分流验证 RS256（Keycloak）与 HS256（本地）
+- 登录页（LoginPage.tsx）WeKnora 式双模式：SSO 按钮 + 邮箱密码表单 + 注册切换，按配置动态显示（只配 OIDC_* → 纯 SSO；只配 OIDC_JWT_SECRET → 纯本地；都配 → 双模式）
+- 参照 GitLab wiki `oidc-demo-flask` 示例：无 id_token 时回退 userinfo 端点取用户信息；`realm_access.roles` 含 `admin` 的登录用户可免 ADMIN_TOKEN 执行清空/批量蒸馏/恢复；API 401 先静默 refresh 续期再回登录页
+- `OIDC_REQUIRED=1` 时对话历史按 ownerSub 隔离（list/get/put/delete/pin/rename 校验所有者）；未配置任何鉴权时行为与历史版本一致（免鉴权）
+- 新增 `tests/oidc.test.ts`（15 用例：PKCE/state 一次性消费/RS256 jwt 校验/防伪造/scrypt 往返与 salt 唯一/HS256 签发校验过期篡改），总 63 vitest 全绿
 - 契约见 [CONTRACTS.md §13 SSO/OIDC 鉴权契约](./CONTRACTS.md#13-ssooidc-鉴权契约)
 
 ### v2.2（2026-10）

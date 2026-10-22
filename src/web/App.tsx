@@ -34,7 +34,7 @@ export function App() {
   }, [refresh, restore, ssoRequired, isAuthed]);
 
   if (config && ssoRequired && !isAuthed) {
-    return <LoginPage providerName={config.sso.providerName} required />;
+    return <LoginPage sso={config.sso} required />;
   }
 
   // 未开始加载 config 时保持首屏骨架（避免首页闪一下登录页再弹回）

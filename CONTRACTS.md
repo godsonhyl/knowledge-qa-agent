@@ -68,7 +68,7 @@ needScore   = 8 − 4.5s
 - `tests/evidence.test.ts`：
   - **§4 应命中 8 条**（术语命中、短语命中、高分命中）
   - **§5 应拒答 7 条**（无关主题、零星字词）
-  - 这两组是任何检索层改动的合入门槛——44 vitest 必须全绿。
+  - 这两组是任何检索层改动的合入门槛——检索相关 vitest 必须全绿。
 
 ### 证据门 5 级判定
 ```
@@ -240,24 +240,23 @@ payload: kind:"doc", name, source, size, addedAt, text
 
 ## 13. SSO/OIDC 鉴权契约
 
-参照 WeKnora 的 OIDC 接入（Authorization Code + PKCE S256），IdP 为 Keycloak（`http://sso.jinde.local/realms/test`）。
+参照 WeKnora 的 OIDC 接入（Authorization Code + PKCE S256）+ 本地账号双模式，IdP 为 Keycloak（`http://sso.jinde.local/realms/test`）。
 
 | 契约 | 实现 |
 |---|---|
-| **未配置即不启用** | 未配齐 `OIDC_ISSUER/CLIENT_ID/SECRET` → 中间件直接放行，所有 API 免鉴权（与历史行为一致，回归不退化）；`/api/config` 的 `sso.enabled=false`，登录页不出现 |
-| **密钥隔离** | `OIDC_CLIENT_SECRET` 只在服务端 env；`/api/config` 仅下发 `{enabled, required, providerName, loginUrl}`，绝不下发 secret/client_secret |
-| **放行白名单** | `/api/config`（就绪探测）+ `/api/auth/*`（登录流程本身）免鉴权；其余 `/api/*` 受保护 |
-| **强制开关** | `OIDC_REQUIRED=0`（默认）：鉴权不强制，不挂 SSO 也能用；`=1`：无 token → API 401（附 `loginUrl`），HTML 导航 302 跳 `/api/auth/oidc/login` |
-| **token 验签** | access/id token 必须是 RS256 JWT，`iss === OIDC_ISSUER`、`aud` 含 `client_id`、`exp` 未过期；签名经 JWKS 公钥（缓存 24h，kid 轮换自动重拉）`createVerify('RSA-SHA256')` 校验；alg 白名单仅 RS256 |
-| **PKCE** | verifier 48 字节随机，`S256` challenge；state + verifier 存服务端内存 Map，**一次性消费**（`takePending` 删后即失效，防重放），5 分钟 TTL |
-| **会话凭证** | 回调页把 `access_token` 写 `localStorage('kqa.token')`（与 WeKnora `weknora_token` 同模型），每个 API 请求 `Authorization: Bearer`；`refreshToken`/`user` 存 `kqa.refreshToken`/`kqa.user` |
-| **401 统一处理** | 前端任一 API 收到 401 → 清凭证 → 回登录页（`handleUnauthorized`） |
-| **服务端无会话表** | 无状态鉴权：不存 session，全部靠 token 自校验；state Map 仅是登录流程的临时暂存 |
-| **检索单测不受影响** | §4/§5 直接调 retriever，不经 HTTP 鉴权层；`tests/oidc.test.ts` 用本地生成 RSA 密钥 + 假 IdP 覆盖 PKCE/state/jwt 校验/防伪造 |
-| **用户信息来源** | 优先 id_token claims（标准 OIDC）；无 id_token 时回退 userinfo 端点（与 Flask demo `oidc-demo-flask` 同路径） |
-| **管理员角色** | access_token 的 `realm_access.roles` 含 `admin`（Keycloak 特有字段，Flask demo `@roles_required('admin')` 同源）→ `adminGate` 放行，清空/蒸馏/恢复免令牌；`OIDC_REQUIRED=0` 时角色不参与授权（仍走 ADMIN_TOKEN） |
-| **静默续期** | API 401 → 前端先 `POST /api/auth/refresh`（refresh_token）换新 access_token 重试一次；失败才清凭证回登录页 |
-| **GET /api/auth/me** | 携 Bearer 返回当前用户 `{sub,name,email,username,roles}`（Flask demo `g.user` 对齐），未登录 401 |
+| **未配置即不启用** | 未配 `OIDC_*` 且未配 `OIDC_JWT_SECRET` → 中间件直接放行，所有 API 免鉴权（与历史行为一致，回归不退化）；登录页不出现 |
+| **双模式开关** | `OIDC_*` 启用 SSO；`OIDC_JWT_SECRET` 启用本地账号（注册/密码登录）。两者独立，可单开、可并存（WeKnora 式登录页：SSO 按钮 + 本地表单 + 注册入口） |
+| **密钥隔离** | `OIDC_CLIENT_SECRET`/`OIDC_JWT_SECRET` 只在服务端 env；`/api/config` 仅下发 `{enabled, required, providerName, loginUrl, localEnabled, registrationEnabled}` |
+| **放行白名单** | `/api/config`（就绪探测）+ `/api/auth/*`（登录/注册流程本身）免鉴权；其余 `/api/*` 受保护 |
+| **强制开关** | `OIDC_REQUIRED=0`（默认）：鉴权不强制；`=1`：无 token → API 401、HTML 导航 302 回首页由前端渲染登录页 |
+| **token 双源** | OIDC 的 RS256 JWT（Keycloak 签，JWKS 验签）与本地 HS256 JWT（我们签，HMAC secret 验签）。middleware 按 header.alg 分流：HS256→本地，RS256→OIDC |
+| **本地 JWT 契约** | iss=aud=`"kqa"`；access 8h / refresh 30d；claims 带 sub/email/name/username/roles/source；签名 HMAC-SHA256 + timingSafeEqual |
+| **密码存储** | scrypt（node:crypto 内置，N=16384）+ 16 字节随机 salt；明文密码绝不落库/落日志 |
+| **OIDC 首登落库** | OIDC 回调把用户写入 `kqa_users`（source=oidc，oidcSub=sub）；重复登录仅更新 lastLoginAt/roles |
+| **对话历史隔离** | `OIDC_REQUIRED=1` 时对话带 `ownerSub`（sub），list/get/put/delete/pin/rename 校验所有者；`=0` 时无 owner（共享，历史行为） |
+| **PKCE** | verifier 48 字节随机，`S256` challenge；state + verifier 存服务端内存 Map，**一次性消费**（防重放），5 分钟 TTL |
+| **401 处理** | 前端先静默 `POST /api/auth/refresh`（HS256 重签 / RS256 转 Keycloak）续期一次；失败才清凭证回登录页 |
+| **检索单测不受影响** | §4/§5 直接调 retriever，不经 HTTP 鉴权层；`tests/oidc.test.ts` 用本地生成 RSA 密钥 + 假 IdP 覆盖 PKCE/state/jwt 校验/防伪造/scrypt/HS256 |
 
 **Keycloak 侧配置**：realm `test` 新建 confidential client（如 `kqa-test`），开启 Standard Flow，Valid Redirect URI 填 `http://<host>:3002/api/auth/oidc/callback`（HTTPS 部署用 `https://<host>:3443/...`）。
 
@@ -272,10 +271,10 @@ payload: kind:"doc", name, source, size, addedAt, text
 | `tests/confluence.test.ts` | §11 Confluence URL 解析（4 种形式 + 拒绝）+ storage→纯文本 + 引用编号校验 |
 | `tests/pdf.test.ts` | §PDF-1 可解析 PDF 提取原文；§PDF-2 无文字层抛 `PdfNoTextError` |
 | `tests/factCheck.test.ts` | §FC-1 数字在原文无警告；§FC-2 IP 无依据挂警告；§FC-3 版本主段豁免；§FC-4 只看被引用片段 |
-| `tests/oidc.test.ts` | §13 SSO/OIDC：PKCE challenge、state 一次性消费、RS256 jwt（iss/aud/exp）校验、签名篡改与 alg 白名单 |
+| `tests/oidc.test.ts` | §13 SSO/OIDC + 本地账号：PKCE challenge、state 一次性消费、RS256 jwt（iss/aud/exp）校验、签名篡改；scrypt 密码往返/salt 唯一、HS256 签发/校验/过期/篡改 |
 | `scripts/e2e.mjs` | 对运行中的 stack：种子导入 + §4/§5 + 引用偏移往返 + chat SSE 透传 |
 
-**合入门槛**：任何检索层改动前先跑 `npm test`（56 全绿）；UI 改动后跑 `npm run typecheck` + `build`。
+**合入门槛**：任何检索层改动前先跑 `npm test`（63 全绿）；UI 改动后跑 `npm run typecheck` + `build`。
 
 ---
 
