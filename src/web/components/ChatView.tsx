@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Switch, Button, Tag } from 'tdesign-react';
-import { SunnyIcon, MoonIcon, ChatIcon, FileIcon, MapInformationIcon as MapIcon, TipsIcon } from 'tdesign-icons-react';
+import { SunnyIcon, MoonIcon, MapInformationIcon as MapIcon, TipsIcon, SearchIcon, VerifiedIcon, QuoteIcon, SecuredIcon, LinkIcon, ServerIcon } from 'tdesign-icons-react';
 import { useChatStore, type ChatMessage } from '../stores/chat.js';
 import { useConfigStore } from '../stores/config.js';
 import { useKbStore } from '../stores/kb.js';
@@ -154,24 +154,37 @@ function Welcome({ config }: { config: ConfigResp | null }) {
   return (
     <div className="welcome">
       <div className="welcome-mark">据</div>
-      <h2>企业知识问答 Agent</h2>
+      <h2>企业知识问答</h2>
       <p>
-        基于导入的知识库作答，每个结论附可溯源的引用编号 [n]，点击直达原文。<br />
-        知识库无依据时如实拒答{webSearch ? '，支持手动联网搜索补充（醒目标注为非知识库依据）' : ''}，不伪装有据可循。
+        检索导入的知识库，答案仅基于命中原文生成，附可溯源引用。<br />
+        无依据时如实拒答{webSearch ? '，可联网搜索补充并标注来源' : ''}，杜绝幻觉与虚构信息。
       </p>
       <div className="welcome-tips">
         <div className="tip">
-          <ChatIcon /><b>溯源引用</b>结论旁的 [n] 对应可定位的原文片段，点击高亮
+          <VerifiedIcon /><b>引用溯源</b>答案附 [n] 编号引用，与证据片段一一对应，全部可回溯验证
         </div>
         <div className="tip">
-          <FileIcon /><b>混合检索</b>BM25 词法 + bge-m3 向量双通道，RRF 融合精排
+          <SearchIcon /><b>混合检索</b>BM25 词法与 bge-m3 语义向量双路召回，RRF 融合后精排
         </div>
         <div className="tip">
-          <MapIcon /><b>原文定位</b>角标与证据卡联动，跳转至原文精确行
+          <MapIcon /><b>原文定位</b>引用可跳转至原文出处，精准高亮对应段落与行号
         </div>
         <div className="tip">
-          <TipsIcon /><b>诚实拒答</b>无依据则明确说明{webSearch ? '，可联网兜底并标注来源' : '，不冒充有据可循'}
+          <QuoteIcon /><b>事实直查</b>命中确定性事实时直接呈现原文，零延迟且无误写
         </div>
+        <div className="tip">
+          <TipsIcon /><b>诚实拒答</b>知识库无依据时明确说明，不虚构、不冒充、不含糊其辞
+        </div>
+        <div className="tip">
+          {webSearch ? <LinkIcon /> : <SecuredIcon />}
+          <b>{webSearch ? '联网兜底' : '企业私有'}</b>
+          {webSearch
+            ? '拒答后可手动联网搜索补充，结果明确标注非知识库依据'
+            : '知识库自建于内网环境，数据不经外部服务，问答全程留痕'}
+        </div>
+      </div>
+      <div className="welcome-kb">
+        <ServerIcon />知识库导入支持：拖拽文本与 PDF · Confluence 同步 · 目录批量 · 多分组检索
       </div>
     </div>
   );

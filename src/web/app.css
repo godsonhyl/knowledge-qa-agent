@@ -402,8 +402,8 @@ b { font-weight: 600; }
 .welcome h2 { margin: 0 0 10px; font-size: 22px; font-weight: 600; color: var(--text); }
 .welcome p { margin: 0 auto; max-width: 620px; color: var(--text-2); font-size: 13.5px; line-height: 1.85; }
 .welcome-tips {
-  margin: 24px auto 0; max-width: 680px;
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px;
+  margin: 24px auto 0; max-width: 720px;
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;
   text-align: left;
 }
 .tip {
@@ -419,6 +419,12 @@ b { font-weight: 600; }
 }
 .tip .t-icon { color: var(--accent); margin-right: 4px; vertical-align: -2px; font-size: 15px; }
 .tip b { display: block; color: var(--text); font-size: 12.5px; margin-bottom: 2px; }
+.welcome-kb {
+  margin: 14px auto 0; max-width: 720px;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  font-size: 11.5px; color: var(--text-2);
+}
+.welcome-kb .t-icon { color: var(--accent); margin-right: 2px; vertical-align: -2px; font-size: 13px; }
 
 /* ---------------- 6. 消息与回答 ---------------- */
 
@@ -982,6 +988,7 @@ b { font-weight: 600; }
   .composer-wrap { padding: 8px 12px 10px; }
   .field-row { grid-template-columns: 1fr; }
   .welcome-tips { grid-template-columns: 1fr; }
+  .welcome-kb { flex-wrap: wrap; text-align: center; }
 }
 
 /* ============================================================
