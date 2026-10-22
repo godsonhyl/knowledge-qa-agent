@@ -24,6 +24,12 @@ export interface DocPayload {
   size: number;
   addedAt: number;
   text: string;
+  /** Confluence 文档的 pageId（增量同步用；非 Confluence 文档为 null） */
+  confluencePageId?: string | null;
+  /** Confluence 文档的版本号（增量同步：变更则重切块重嵌入） */
+  confluenceVersion?: number | null;
+  /** 最后同步时间（ms） */
+  syncedAt?: number | null;
 }
 
 export interface ChunkPayload {
@@ -63,8 +69,12 @@ export async function findDocByName(name: string): Promise<{ id: string; payload
   return pts.length ? { id: pts[0]!.id, payload: pts[0]!.payload } : null;
 }
 
-/** 导入一篇文档：切块 → 嵌入 → 双 collection upsert。重名返回 dup error。 */
-export async function addDoc(name: string, text: string, source: DocSource): Promise<ImportResult> {
+/** 导入一篇文档：切块 → 嵌入 → 双 collection upsert。重名返回 dup error。
+ *  opts.confluencePageId / confluenceVersion：Confluence 文档的增量同步元数据（非 Confluence 不传）。 */
+export async function addDoc(
+  name: string, text: string, source: DocSource,
+  opts: { confluencePageId?: string; confluenceVersion?: number } = {},
+): Promise<ImportResult> {
   const trimmed = String(text || '').trim();
   if (!trimmed) throw new KbError(400, '内容为空');
   if (trimmed.length > MAX_DOC_CHARS) throw new KbError(413, `文档超过 ${Math.round(MAX_DOC_CHARS / 1024 / 1024)}MB 上限`);
@@ -105,7 +115,12 @@ export async function addDoc(name: string, text: string, source: DocSource): Pro
   const docPoint = {
     id: docId,
     vector: [0],
-    payload: { kind: 'doc', name, source, size: trimmed.length, addedAt, text: trimmed } satisfies DocPayload,
+    payload: {
+      kind: 'doc', name, source, size: trimmed.length, addedAt, text: trimmed,
+      confluencePageId: opts.confluencePageId ?? null,
+      confluenceVersion: opts.confluenceVersion ?? null,
+      syncedAt: Date.now(),
+    } satisfies DocPayload,
   };
   await upsertPoints(COLLECTION_DOCS, [docPoint]);
 
@@ -161,7 +176,7 @@ export async function restoreFromBackup(entries: { name: string; text: string; s
 /** 文档列表（payload 投影排除 text） */
 export async function listDocs(): Promise<DocMeta[]> {
   const docs = await scrollAll<DocPayload>(
-    COLLECTION_DOCS, null, ['kind', 'name', 'source', 'size', 'addedAt'],
+    COLLECTION_DOCS, null, ['kind', 'name', 'source', 'size', 'addedAt', 'confluencePageId', 'confluenceVersion', 'syncedAt'],
   );
   const metas: DocMeta[] = [];
   for (const d of docs) {
@@ -192,6 +207,55 @@ export async function getDoc(docId: string): Promise<{ payload: DocPayload } | n
   const body = (await res.json()) as { result: { payload: DocPayload }[] };
   const p = body.result?.[0];
   return p ? { payload: p.payload } : null;
+}
+
+/** 原子更新一篇文档：删除旧块 → 重新切块嵌入 → upsert doc + chunks。
+ *  保留 docId（不动 docName 时换内容仍幂等：chunk id 是 docId:index 派生）。
+ *  用于 Confluence 增量同步——text 变了就重新切块，version/pageId 元数据回写。 */
+export async function updateDocContent(
+  docId: string,
+  newText: string,
+  meta: { confluenceVersion?: number | null; syncedAt?: number } = {},
+): Promise<void> {
+  const existing = await getDoc(docId);
+  if (!existing) throw new KbError(404, '文档不存在');
+  const trimmed = String(newText || '').trim();
+  if (!trimmed) throw new KbError(400, '内容为空');
+
+  // 删除旧块
+  await deleteByFilter(COLLECTION_CHUNKS, { must: [{ key: 'docId', match: { value: docId } }] });
+
+  // 重新切块嵌入（与 addDoc 一致，但保留原 docId）
+  const raw = chunkDocument(trimmed, existing.payload.name);
+  const vectors: number[][] = [];
+  if (embedReady()) {
+    const inputs = raw.map((c) => embedInputFor(c.text, null));
+    for (let i = 0; i < inputs.length; i += 32) {
+      vectors.push(...await embed(inputs.slice(i, i + 32)));
+    }
+  } else {
+    for (let i = 0; i < raw.length; i++) vectors.push(new Array(ENV.EMBED_DIM).fill(0));
+  }
+  const chunkPoints = raw.map((c, i) => ({
+    id: chunkIdFor(docId, i),
+    vector: vectors[i]!,
+    payload: {
+      kind: 'chunk', docId, index: i, docName: existing.payload.name, section: c.section,
+      startLine: c.startLine, endLine: c.endLine, startChar: c.startChar, endChar: c.endChar,
+      text: c.text, summary: null, summaryAt: null, source: existing.payload.source,
+      addedAt: existing.payload.addedAt,
+    } satisfies ChunkPayload,
+  }));
+  await upsertPoints(COLLECTION_CHUNKS, chunkPoints);
+
+  const newDocPayload: DocPayload = {
+    ...existing.payload,
+    size: trimmed.length,
+    text: trimmed,
+    confluenceVersion: meta.confluenceVersion ?? existing.payload.confluenceVersion ?? null,
+    syncedAt: meta.syncedAt ?? Date.now(),
+  };
+  await upsertPoints(COLLECTION_DOCS, [{ id: docId, vector: [0], payload: newDocPayload as unknown as Record<string, unknown> }]);
 }
 
 export async function removeDoc(docId: string): Promise<boolean> {

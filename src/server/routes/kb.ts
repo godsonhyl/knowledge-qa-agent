@@ -13,10 +13,13 @@ import {
   addDoc, bulkAddDocs, listDocs, getDoc, removeDoc, clearAll,
   listChunks, getStats, KbError,
   exportForBackup, restoreFromBackup,
+  COLLECTION_DOCS, COLLECTION_CHUNKS, updateDocContent,
 } from '../kbStore.js';
+import { scrollAll } from '../qdrant.js';
+import { fetchConfluencePage, type ConfPage } from '../confluence.js';
 import { kbIndex } from '../kbIndex.js';
 import { distillChunkInto } from '../distill.js';
-import { ENV, llmReady } from '../env.js';
+import { ENV, llmReady, confluenceReady as confluenceReadyFn } from '../env.js';
 import { writeKbBackup, listKbBackups, readKbBackup, pruneKbBackups } from '../backup.js';
 import { startDistillJob, stopDistillJob, distillJob } from '../distillJob.js';
 import { extractPdfText, PdfNoTextError } from '../pdf.js';
@@ -54,8 +57,16 @@ kb.post('/docs', async (c) => {
     return c.json({ error: '需要 {name, text}' }, 400);
   }
   const source: DocSource = SOURCES.includes(body.source) ? body.source : 'file';
+  // Confluence 增量同步元数据（可选）
+  const syncMeta: { confluencePageId?: string; confluenceVersion?: number } = {};
+  if (typeof body.confluencePageId === 'string' && /^\d+$/.test(body.confluencePageId)) {
+    syncMeta.confluencePageId = body.confluencePageId;
+  }
+  if (typeof body.confluenceVersion === 'number') {
+    syncMeta.confluenceVersion = body.confluenceVersion;
+  }
   try {
-    const r = await kbIndex.run(() => addDoc(body.name, body.text, source));
+    const r = await kbIndex.run(() => addDoc(body.name, body.text, source, syncMeta));
     await kbIndex.run(() => kbIndex.rebuild());
     return c.json(r, 201);
   } catch (err) {
@@ -293,6 +304,55 @@ kb.post('/distill-all', async (c) => {
 /** GET /api/kb/distill-status —— 批量蒸馏进度（公开只读，前端轮询） */
 kb.get('/distill-status', async (c) => {
   return c.json(distillJob);
+});
+
+/** POST /api/kb/sync-confluence —— Confluence 增量同步
+ *  扫描库内所有 source=confluence 且带 confluencePageId 的文档，
+ *  逐页抓取最新版本号比对，有变更的 updateDocContent（重切块+重嵌入）。
+ *  无 confluencePageId 的老文档（导入时未存版本）跳过——下次重导即带上。 */
+kb.post('/sync-confluence', async (c) => {
+  if (!confluenceReadyFn()) {
+    return c.json({ error: '服务端未配置 Confluence 接入' }, 503 as 400);
+  }
+  try {
+    interface ConfDocPayload {
+      name: string;
+      confluencePageId?: string | null;
+      confluenceVersion?: number | null;
+    }
+    const docs = await scrollAll<ConfDocPayload>(COLLECTION_DOCS, {
+      must: [{ key: 'source', match: { value: 'confluence' } }],
+    }, ['kind', 'name', 'source', 'size', 'addedAt', 'confluencePageId', 'confluenceVersion', 'syncedAt']);
+    let checked = 0;
+    let updated = 0;
+    let failed = 0;
+    const details: string[] = [];
+    for (const d of docs) {
+      const pid = d.payload.confluencePageId;
+      if (!pid) { continue; }  // 老文档无 pageId，跳过
+      checked++;
+      try {
+        // 用 pageId 构造 viewpage URL，调 fetchConfluencePage 取最新版本
+        const url = `${ENV.CONFLUENCE_BASE_URL}/pages/viewpage.action?pageId=${pid}`;
+        const page = await fetchConfluencePage(url) as ConfPage;
+        const curVer = page.version ?? null;
+        const oldVer = d.payload.confluenceVersion;
+        if (curVer !== null && curVer === oldVer) continue;  // 版本未变，跳过
+        await kbIndex.run(() => updateDocContent(d.id, page.text, {
+          confluenceVersion: curVer,
+          syncedAt: Date.now(),
+        }));
+        await kbIndex.run(() => kbIndex.rebuild());
+        updated++;
+      } catch (err) {
+        failed++;
+        details.push(`${d.payload.name}：${String((err as Error)?.message || err)}`);
+      }
+    }
+    return c.json({ checked, updated, failed, details: details.slice(0, 5) });
+  } catch (err) {
+    return c.json({ error: String((err as Error)?.message || err) }, 500);
+  }
 });
 
 /** POST /api/kb/distill-stop —— 中断批量蒸馏（管理员） */

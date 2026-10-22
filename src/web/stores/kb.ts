@@ -45,6 +45,8 @@ interface KbState {
   uploadPdf: (file: File) => Promise<boolean>;
   uploadPdfs: (files: File[]) => Promise<void>;
   importConfluence: (url: string, recursive: boolean) => Promise<void>;
+  /** Confluence 增量同步：按版本号比对库内已导入页面，更新变更的 */
+  syncConfluence: () => Promise<void>;
   loadSeed: () => Promise<void>;
   removeDoc: (docId: string) => Promise<void>;
   clearAll: () => Promise<void>;
@@ -184,7 +186,7 @@ export const useKbStore = create<KbState>((set, get): KbState => ({
 
   importConfluence: async (url, recursive) => {
     get().toast(recursive ? '抓取子树中…' : '抓取中…');
-    const r = await api<{ pages?: { name: string; text: string }[]; text?: string; title?: string; skipped?: unknown[]; truncated?: boolean; error?: string }>('/api/confluence-page', {
+    const r = await api<{ pages?: { name: string; text: string; pageId?: string; version?: number | null }[]; text?: string; title?: string; pageId?: string; version?: number | null; skipped?: unknown[]; truncated?: boolean; error?: string }>('/api/confluence-page', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url, recursive }),
@@ -195,15 +197,29 @@ export const useKbStore = create<KbState>((set, get): KbState => ({
     }
     if (!recursive) {
       const name = `${r.data.title || 'Confluence 页面'}.md`;
-      await get().addDoc(name, r.data.text || '', 'confluence');
+      // 单页导入直接调 API（带 pageId/version，供增量同步比对）
+      const rr = await api<{ error?: string }>('/api/kb/docs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name, text: r.data.text || '', source: 'confluence',
+          confluencePageId: r.data.pageId, confluenceVersion: r.data.version ?? undefined,
+        }),
+      });
+      if (rr.ok) get().toast(`已导入「${name}」`, 'ok');
+      else if (rr.status === 409) get().toast(`已跳过重复文档：${name}`);
+      else get().toast(`导入失败：${rr.data?.error || rr.status}`, 'err');
     } else {
-      const pages = r.data.pages || [];
+      const pages = (r.data.pages || []) as { name: string; text: string; pageId?: string; version?: number | null }[];
       let ok = 0; let dup = 0;
       for (const p of pages) {
         const rr = await api<{ error?: string }>('/api/kb/docs', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: p.name, text: p.text, source: 'confluence' }),
+          body: JSON.stringify({
+            name: p.name, text: p.text, source: 'confluence',
+            confluencePageId: p.pageId, confluenceVersion: p.version ?? undefined,
+          }),
         });
         if (rr.ok) ok++;
         else if (rr.status === 409) dup++;
@@ -212,6 +228,27 @@ export const useKbStore = create<KbState>((set, get): KbState => ({
       if (dup) get().toast(`已跳过重复页面 ${dup} 篇`);
       if (r.data.truncated) get().toast('子树页面过多，达到 200 页上限，仅导入前一部分', 'err');
       if ((r.data.skipped || []).length) get().toast(`${(r.data.skipped as unknown[]).length} 个被跳过`, 'err');
+    }
+    await get().refresh();
+  },
+
+  /** Confluence 增量同步：扫描库内所有带 confluencePageId 的文档，
+   *  比对版本号，有变更的重新抓取 → 更新文本 → 重新切块嵌入。
+   *  返回 {checked, updated, failed}。 */
+  syncConfluence: async () => {
+    get().toast('同步中…');
+    const r = await api<{ checked?: number; updated?: number; failed?: number; details?: string[]; error?: string }>('/api/kb/sync-confluence', {
+      method: 'POST',
+    });
+    if (!r.ok) {
+      get().toast(`同步失败：${r.data?.error || r.status}`, 'err');
+      return;
+    }
+    const { checked = 0, updated = 0, failed = 0 } = r.data;
+    if (updated === 0) {
+      get().toast(`已检查 ${checked} 篇，无需更新`, '');
+    } else {
+      get().toast(`已同步 ${updated}/${checked} 篇${failed ? `（${failed} 失败）` : ''}`, failed ? 'err' : 'ok');
     }
     await get().refresh();
   },

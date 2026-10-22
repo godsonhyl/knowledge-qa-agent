@@ -11,6 +11,8 @@ export function Sidebar() {
   const config = useConfigStore((s) => s.config);
   const loadSeed = useKbStore((s) => s.loadSeed);
   const clearAll = useKbStore((s) => s.clearAll);
+  const syncConfluence = useKbStore((s) => s.syncConfluence);
+  const loading = useKbStore((s) => s.loading);
   const docs = useKbStore((s) => s.docs);
   const distillJob = useKbStore((s) => s.distillJob);
   const startDistillAll = useKbStore((s) => s.startDistillAll);
@@ -76,6 +78,15 @@ export function Sidebar() {
         <div className="kb-actions">
           <Button variant="outline" size="small" onClick={() => loadSeed()}>载入示例</Button>
           <Button variant="outline" size="small" onClick={() => window.dispatchEvent(new CustomEvent('open-summary'))}>汇总</Button>
+          {config?.confluence && (
+            <Button
+              variant="outline"
+              size="small"
+              title="按版本号比对库内 Confluence 页面，有变更的重新抓取并重建索引"
+              disabled={loading}
+              onClick={() => void syncConfluence()}
+            >同步 Confluence</Button>
+          )}
           {clearEnabled ? (
             <button
               className={`btn btn-sm ${clearArmed ? 'btn-danger-armed' : 'btn-ghost danger'}`}

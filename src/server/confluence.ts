@@ -100,10 +100,11 @@ export interface ConfPage {
   space: string;
   url: string;
   text: string;
+  version: number | null;
 }
 
 export interface ConfTree {
-  pages: { name: string; title: string; pageId: string; url: string; text: string }[];
+  pages: { name: string; title: string; pageId: string; url: string; text: string; version: number | null }[];
   skipped: { name: string; reason: string }[];
   truncated: boolean;
 }
@@ -118,7 +119,7 @@ export async function fetchConfluencePage(url: string, opts: { recursive?: boole
   const insecure = ENV.CONFLUENCE_INSECURE_TLS;
 
   async function getPageWithBody(id: string): Promise<ConfPage> {
-    const api = `${base}/rest/api/content/${id}?expand=body.storage.title,space`;
+    const api = `${base}/rest/api/content/${id}?expand=body.storage.title,space,version`;
     let data: any;
     try {
       data = await httpsGetJson(api, headers, insecure);
@@ -139,6 +140,7 @@ export async function fetchConfluencePage(url: string, opts: { recursive?: boole
       space: data.space?.key || data.space?.name || (info ? info.spaceKey : '') || '',
       url: `${base}/pages/viewpage.action?pageId=${id}`,
       text: confluenceStorageToText(data?.body?.storage?.value || ''),
+      version: data?.version?.number ?? null,
     };
   }
 
@@ -150,7 +152,7 @@ export async function fetchConfluencePage(url: string, opts: { recursive?: boole
 
   const root = await getPageWithBody(info.pageId);
   const rootTitle = root.title;
-  const all: ConfTree['pages'] = [{ name: sanitizeFilename(`${rootTitle}.md`), title: root.title, pageId: root.pageId, url: root.url, text: root.text }];
+  const all: ConfTree['pages'] = [{ name: sanitizeFilename(`${rootTitle}.md`), title: root.title, pageId: root.pageId, url: root.url, text: root.text, version: root.version }];
   const skipped: { name: string; reason: string }[] = [];
 
   let start = 0;
@@ -176,7 +178,7 @@ export async function fetchConfluencePage(url: string, opts: { recursive?: boole
         const p = await getPageWithBody(id);
         const name = sanitizeFilename(`${rootTitle}/${p.title}.md`);
         if (!p.text) skipped.push({ name, reason: '正文为空' });
-        else all.push({ name, title: p.title, pageId: p.pageId, url: p.url, text: p.text });
+        else all.push({ name, title: p.title, pageId: p.pageId, url: p.url, text: p.text, version: p.version });
       } catch (err) {
         skipped.push({ name: r.title || id, reason: String((err as Error)?.message || err) });
       }
