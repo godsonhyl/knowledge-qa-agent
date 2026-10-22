@@ -21,8 +21,12 @@ export function Sidebar() {
   const stopDistillAll = useKbStore((s) => s.stopDistillAll);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const ssoUser = useAuthStore((s) => s.user);
+  const isAdmin = useAuthStore((s) => s.isAdmin);
+  // SSO 强制鉴权模式：登录用户凭 admin 角色即可清空，无需令牌
+  const ssoAdminBypass = !!(config?.sso?.required && isAdmin);
 
   // 清空需要管理员令牌。clearEnabled=false（服务端没配 ADMIN_TOKEN）→ 按钮直接隐藏。
+  // SSO admin 角色模式下 clearEnabled 跟随服务端 ADMIN_TOKEN 是否配置，但可绕过令牌输入。
   const clearEnabled = !!config?.clearEnabled;
   const [hasAdminToken, setHasAdminToken] = useState(() => !!sessionStorage.getItem('kqa.adminToken'));
 
@@ -33,7 +37,7 @@ export function Sidebar() {
 
   async function onClearClick() {
     if (!docs.length) return;
-    if (!hasAdminToken) {
+    if (!ssoAdminBypass && !hasAdminToken) {
       const tok = window.prompt('清空知识库需要管理员令牌。请输入 ADMIN_TOKEN：');
       if (!tok) return;
       sessionStorage.setItem('kqa.adminToken', tok.trim());
@@ -110,12 +114,12 @@ export function Sidebar() {
               title="反馈汇总（👍/👎 检索调优数据）"
               onClick={() => window.dispatchEvent(new CustomEvent('open-feedback'))}
             ><ThumbUpIcon /></button>
-            {clearEnabled ? (
+            {clearEnabled || ssoAdminBypass ? (
               <button
                 className={`tool-icon ${clearArmed ? 'tool-icon-danger' : ''}`}
                 title={clearArmed
-                  ? `再点一次确认清空 ${docs.length} 篇（需管理员令牌，不可恢复）`
-                  : '清空全部文档（需管理员令牌，不可恢复）'}
+                  ? `再点一次确认清空 ${docs.length} 篇（${ssoAdminBypass ? 'SSO admin 角色' : '需管理员令牌'}，不可恢复）`
+                  : `清空全部文档（${ssoAdminBypass ? 'SSO admin 角色' : '需管理员令牌'}，不可恢复）`}
                 onClick={onClearClick}
               >{clearArmed ? <span className="tool-icon-danger-text">确认 {docs.length} 篇</span> : <DeleteIcon />}</button>
             ) : (

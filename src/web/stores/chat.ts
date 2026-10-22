@@ -85,7 +85,7 @@ async function callModel(messages: { role: string; content: string }[], signal: 
   });
 
   if (!res.ok) {
-    if (res.status === 401) { handleUnauthorized(); throw new Error('未登录'); }
+    if (res.status === 401) { void handleUnauthorized(); throw new Error('未登录'); }
     let detail = '';
     try { const j = await res.json(); detail = j.error || j.detail || ''; } catch { /* ignore */ }
     throw new Error(`模型接口返回 ${res.status}：${String(detail).slice(0, 200)}`);
@@ -402,7 +402,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ q: msg.question, limit: 6 }),
       });
-      if (res.status === 401) { handleUnauthorized(); return; }
+      if (res.status === 401) { void handleUnauthorized(); return; }
       if (!res.ok) {
         const d: any = await res.json().catch(() => null);
         throw new Error(d?.error || `搜索服务返回 ${res.status}`);

@@ -38,8 +38,16 @@ function jsonError(c: any, err: unknown) {
 const SOURCES: DocSource[] = ['file', 'paste', 'confluence', 'seed', 'test'];
 
 /** 管理员令牌校验：没配 ADMIN_TOKEN 或令牌错误都返回 403。
- *  hash 后 timingSafeEqual 定长比较，防时序侧信道。 */
+ *  hash 后 timingSafeEqual 定长比较，防时序侧信道。
+ *  OIDC_REQUIRED 模式下，realm 角色（Keycloak realm_access.roles）含 admin 也算通过——
+ *  与 Flask demo 的 @roles_required('admin') 对齐：登录用户凭 SSO 角色即可，无需再输入令牌。 */
 function adminGate(c: any): boolean {
+  if (ENV.OIDC_REQUIRED) {
+    const u = c.get('ssoUser') as { roles?: string[] } | undefined;
+    const roles = u?.roles || [];
+    if (roles.includes('admin')) return true;
+    // OIDC 强制登录已校验身份；这里仍允许 ADMIN_TOKEN 双因素兜底
+  }
   if (!ENV.ADMIN_TOKEN) return false;
   const token = c.req.header('X-Admin-Token') || '';
   const a = createHash('sha256').update(token).digest();
@@ -48,6 +56,9 @@ function adminGate(c: any): boolean {
 }
 
 function adminError(c: any) {
+  if (ENV.OIDC_REQUIRED && ENV.ADMIN_TOKEN) {
+    return c.json({ error: '需要 admin 角色或正确的管理员令牌' }, 403);
+  }
   return c.json({ error: ENV.ADMIN_TOKEN ? '管理员令牌错误' : '功能未启用：服务端需设置 ADMIN_TOKEN' }, 403);
 }
 

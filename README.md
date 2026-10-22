@@ -98,7 +98,8 @@ docker compose
 
 **SSO/OIDC 单点登录（参照 WeKnora，接入企业 Keycloak）**
 - 新增 `src/server/oidc.ts`：Authorization Code + PKCE(S256)，纯 node:crypto 验签（RS256 JWT：iss/aud/exp + JWKS 公钥缓存/轮换），零第三方依赖
-- 新增 `/api/auth/*` 路由：oidc/config、oidc/login（302 Keycloak）、oidc/callback（换 token → 回调页写 localStorage）、refresh、logout
+- 新增 `/api/auth/*` 路由：oidc/config、oidc/login（302 Keycloak）、oidc/callback（换 token → 回调页写 localStorage）、me、refresh、logout
+- 参照 GitLab wiki `oidc-demo-flask` 示例：无 id_token 时回退 userinfo 端点取用户信息；access_token 的 `realm_access.roles` 含 `admin` 的登录用户可免 ADMIN_TOKEN 执行清空/批量蒸馏/恢复（对齐 demo 的 `@roles_required('admin')`）；API 401 先静默 refresh 续期再回登录页
 - `OIDC_REQUIRED=1` 强制鉴权：除 `/api/config`、`/api/auth/*` 外所有 API 需 `Authorization: Bearer`；未配置 OIDC_* 时行为与历史版本一致（免鉴权）
 - 登录页（LoginPage.tsx）参照 WeKnora 布局：左侧品牌展示 + 右侧表单卡，纯 SSO 单按钮；侧栏显示用户名 + 退出
 - 前端全部 fetch 走 `authHeaders()`，401 统一清凭证回登录页

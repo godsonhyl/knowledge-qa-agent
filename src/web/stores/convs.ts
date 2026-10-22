@@ -59,7 +59,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<{ ok: boolean; 
   const res = await fetch(path, { ...init, headers: { ...authHeaders() } });
   let data: any = null;
   try { data = await res.json(); } catch { /* empty */ }
-  if (res.status === 401) handleUnauthorized();
+  if (res.status === 401) { void handleUnauthorized(); return { ok: false, status: 401, data: null as any }; }
   return { ok: res.ok, status: res.status, data };
 }
 

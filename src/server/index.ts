@@ -38,7 +38,14 @@ async function authMiddleware(c: Context, next: () => Promise<void>): Promise<vo
     try {
       const claims = await verifyAccessToken(bearer);
       // 注入用户信息到 context（routes 可选读取）
-      c.set('ssoUser', { sub: claims.sub, name: claims.name || claims.preferred_username || '', email: claims.email || '' });
+      c.set('ssoUser', {
+        sub: claims.sub || '',
+        name: claims.name || claims.preferred_username || claims.email || '',
+        email: claims.email || '',
+        username: claims.preferred_username || claims.email || claims.sub || '',
+        // realm 角色（Keycloak access_token 在 realm_access.roles）；管理员判定用
+        roles: Array.isArray((claims as any).realm_access?.roles) ? (claims as any).realm_access.roles : [],
+      });
       return next();
     } catch (err) {
       // token 无效：若强制鉴权 → 401；否则放行（降级为匿名，与 =0 行为一致）

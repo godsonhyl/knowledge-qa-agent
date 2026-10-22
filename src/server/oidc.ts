@@ -139,7 +139,7 @@ function derToPem(der: Buffer, label: string): string {
 
 /* ---------- JWT 解析 ---------- */
 interface JwtHeader { alg: string; kid?: string; typ?: string; }
-interface JwtClaims {
+export interface JwtClaims {
   iss: string;
   sub?: string;
   aud?: string | string[];
@@ -212,6 +212,29 @@ export async function verifyAccessToken(token: string): Promise<JwtClaims> {
 /** 回调用：校验 id_token */
 export async function verifyIdToken(token: string): Promise<JwtClaims> {
   return verifyJwt(token);
+}
+
+/** 走 userinfo 端点取用户信息（无 id_token 时的回退路径，与 Flask demo 同） */
+export async function fetchUserinfo(accessToken: string): Promise<JwtClaims | null> {
+  try {
+    const disco = await fetchDiscovery();
+    if (!disco.userinfo_endpoint) return null;
+    const res = await fetch(disco.userinfo_endpoint, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) return null;
+    const info = await res.json() as Partial<JwtClaims> & { preferred_username?: string };
+    // userinfo 不含 iss/aud，构造一个带 issuer 的 claims 供 userFromClaims 用
+    return {
+      iss: ENV.OIDC_ISSUER,
+      sub: info.sub,
+      email: info.email,
+      name: info.name,
+      preferred_username: info.preferred_username,
+    } as JwtClaims;
+  } catch {
+    return null;
+  }
 }
 
 /* ---------- 构造 authorize URL ---------- */

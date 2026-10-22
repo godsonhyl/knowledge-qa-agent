@@ -66,7 +66,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<{ ok: boolean; 
   const res = await fetch(path, { ...init, headers: { ...authHeaders() } });
   let data: any = null;
   try { data = await res.json(); } catch { /* empty body */ }
-  if (res.status === 401) handleUnauthorized();
+  if (res.status === 401) { void handleUnauthorized(); return { ok: false, status: 401, data: null as any }; }
   return { ok: res.ok, status: res.status, data };
 }
 
@@ -167,7 +167,7 @@ export const useKbStore = create<KbState>((set, get): KbState => ({
     const res = await fetch('/api/kb/docs/upload', { method: 'POST', headers: authHeaders(), body: fd });
     let data: any = null;
     try { data = await res.json(); } catch { /* empty */ }
-    if (res.status === 401) { handleUnauthorized(); return false; }
+    if (res.status === 401) { void handleUnauthorized(); return false; }
     if (res.ok) return true;
     if (res.status === 409) get().toast(`已跳过重复文档：${file.name}`);
     else if (res.status === 413) get().toast(`「${file.name}」超过 500MB 上限`, 'err');

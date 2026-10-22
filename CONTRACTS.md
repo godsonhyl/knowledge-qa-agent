@@ -254,6 +254,10 @@ payload: kind:"doc", name, source, size, addedAt, text
 | **401 统一处理** | 前端任一 API 收到 401 → 清凭证 → 回登录页（`handleUnauthorized`） |
 | **服务端无会话表** | 无状态鉴权：不存 session，全部靠 token 自校验；state Map 仅是登录流程的临时暂存 |
 | **检索单测不受影响** | §4/§5 直接调 retriever，不经 HTTP 鉴权层；`tests/oidc.test.ts` 用本地生成 RSA 密钥 + 假 IdP 覆盖 PKCE/state/jwt 校验/防伪造 |
+| **用户信息来源** | 优先 id_token claims（标准 OIDC）；无 id_token 时回退 userinfo 端点（与 Flask demo `oidc-demo-flask` 同路径） |
+| **管理员角色** | access_token 的 `realm_access.roles` 含 `admin`（Keycloak 特有字段，Flask demo `@roles_required('admin')` 同源）→ `adminGate` 放行，清空/蒸馏/恢复免令牌；`OIDC_REQUIRED=0` 时角色不参与授权（仍走 ADMIN_TOKEN） |
+| **静默续期** | API 401 → 前端先 `POST /api/auth/refresh`（refresh_token）换新 access_token 重试一次；失败才清凭证回登录页 |
+| **GET /api/auth/me** | 携 Bearer 返回当前用户 `{sub,name,email,username,roles}`（Flask demo `g.user` 对齐），未登录 401 |
 
 **Keycloak 侧配置**：realm `test` 新建 confidential client（如 `kqa-test`），开启 Standard Flow，Valid Redirect URI 填 `http://<host>:3002/api/auth/oidc/callback`（HTTPS 部署用 `https://<host>:3443/...`）。
 
