@@ -700,6 +700,37 @@ b { font-weight: 600; }
 .summary-table td.s-name { white-space: normal; word-break: break-all; max-width: 300px; }
 .summary-table tbody tr:hover td { background: var(--panel-2); }
 
+/* ---------------- 对话历史列表 ---------------- */
+
+.conv-list-wrap { margin-top: 12px; display: flex; flex-direction: column; min-height: 0; }
+.conv-list {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 4px;
+  max-height: 30vh; overflow-y: auto; min-height: 0;
+}
+.conv-item {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 8px; border: 1px solid transparent; border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background .12s, border-color .12s;
+}
+.conv-item:hover { background: var(--panel-2); }
+.conv-item.active {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.conv-meta { flex: 1; min-width: 0; }
+.conv-title {
+  font-size: 12px; font-weight: 500; line-height: 1.35;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.conv-item.active .conv-title { color: var(--accent); }
+.conv-sub { font-size: 10px; color: var(--text-3); margin-top: 1px; }
+.conv-actions { display: flex; gap: 2px; flex: none; opacity: 0; transition: opacity .12s; }
+.conv-item:hover .conv-actions { opacity: 1; }
+.conv-actions .icon-btn { padding: 2px 4px; font-size: 12px; }
+.conv-actions .icon-btn .t-icon { font-size: 13px; }
+
 /* ---------------- 7b. 联网搜索来源（拒答兜底） ---------------- */
 
 .no-evidence-actions {

@@ -11,6 +11,7 @@ import { chat } from './routes/chat.js';
 import { confluence } from './routes/confluence.js';
 import { searchRoute } from './routes/search.js';
 import { webSearch } from './routes/webSearch.js';
+import { conversationsRoute } from './routes/conversations.js';
 import { staticHandler } from './routes/static.js';
 import { certRoute } from './cert.js';
 
@@ -22,6 +23,7 @@ app.route('/api/confluence-page', confluence);
 app.route('/api/kb', kb);
 app.route('/api/kb', searchRoute);
 app.route('/api/web-search', webSearch);
+app.route('/api/conversations', conversationsRoute);
 app.get('/api/*', (c) => c.json({ error: 'not found' }, 404));
 app.get('*', staticHandler);
 

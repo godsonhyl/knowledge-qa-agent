@@ -31,6 +31,8 @@ export interface Env {
   QDRANT_URL: string;
   COLLECTION_CHUNKS: string;
   COLLECTION_DOCS: string;
+  /** 对话历史 collection（默认 kqa_conversations） */
+  COLLECTION_CONVS: string;
 
   CONFLUENCE_BASE_URL: string;
   CONFLUENCE_PAT: string;
@@ -65,6 +67,7 @@ export const ENV: Env = {
   QDRANT_URL: (process.env.QDRANT_URL || 'http://qdrant:6333').replace(/\/+$/, ''),
   COLLECTION_CHUNKS: process.env.COLLECTION_CHUNKS || 'kqa_chunks',
   COLLECTION_DOCS: process.env.COLLECTION_DOCS || 'kqa_docs',
+  COLLECTION_CONVS: process.env.COLLECTION_CONVS || 'kqa_conversations',
 
   CONFLUENCE_BASE_URL: (process.env.CONFLUENCE_BASE_URL || '').replace(/\/+$/, ''),
   CONFLUENCE_PAT: process.env.CONFLUENCE_PAT || '',

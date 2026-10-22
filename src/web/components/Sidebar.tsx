@@ -5,6 +5,7 @@ import { useConfigStore } from '../stores/config.js';
 import { Dropzone } from './Dropzone.js';
 import { ConfluenceImport } from './ConfluenceImport.js';
 import { DocList } from './DocList.js';
+import { ConvList } from './ConvList.js';
 
 export function Sidebar() {
   const config = useConfigStore((s) => s.config);
@@ -121,6 +122,7 @@ export function Sidebar() {
         </div>
 
         <DocList />
+        <ConvList />
       </div>
 
       <div className="side-foot">

@@ -5,6 +5,7 @@ import { create } from 'zustand';
 import type { SearchResult, Hit, WebSearchResult } from '@shared/types.js';
 import { SYSTEM_PROMPT, FALLBACK_SYSTEM_PROMPT, WEB_SEARCH_SYSTEM_PROMPT, REASON_TEXT } from '../qaPrompt.js';
 import { validateCitations } from '../citations.js';
+import { useConvStore } from './convs.js';
 
 export interface ChatMessage {
   id: number;
@@ -38,6 +39,10 @@ interface ChatState {
   requestModelNote: (msgId: number) => Promise<void>;
   /** 联网搜索兜底：拒答后用户主动触发，SearXNG → LLM → 标注非知识库依据 */
   webSearchAnswer: (msgId: number) => Promise<void>;
+  /** 把当前对话同步到服务端历史（失败静默降级 localStorage-only） */
+  syncToServer: () => Promise<void>;
+  /** 从服务端加载一条历史对话 */
+  loadFromServer: (convId: string) => Promise<boolean>;
   restore: () => void;
 }
 
@@ -251,6 +256,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
     set({ streaming: false, abort: null });
     localStorage.setItem(LS_KEY, serialize(get().messages));
+    void get().syncToServer();
   },
 
   stop: () => {
@@ -260,6 +266,60 @@ export const useChatStore = create<ChatState>((set, get) => ({
   newChat: () => {
     set({ messages: [] });
     localStorage.removeItem(LS_KEY);
+    // 服务端开新对话（不动服务端历史记录，只切当前指针）
+    useConvStore.getState().startNew();
+    useConvStore.getState().refresh().catch(() => undefined);
+  },
+
+  /** 把当前消息同步到服务端对话历史（每轮 ask / 兜底 / webSearch 完成后调用）。
+   *  失败静默——服务端不可用不阻塞本地问答，下轮会再同步。 */
+  syncToServer: async () => {
+    try {
+      const convId = await useConvStore.getState().ensureCurrent(
+        get().messages.find((m) => m.role === 'user')?.question || '新对话',
+      );
+      // 序列化为服务端 ConvMsgWire（hitRefs 代替完整 hits，搜索结果不重复存全量）
+      const wire = get().messages.map((m) => ({
+        id: m.id,
+        role: m.role,
+        question: m.question,
+        text: m.text,
+        hitRefs: m.hits?.map((h) => ({
+          docName: h.docName, section: h.section,
+          startLine: h.startLine, endLine: h.endLine,
+        })),
+        used: m.used ? Array.from(m.used) : undefined,
+        aborted: m.aborted,
+        fallback: m.fallback,
+        webAnswer: m.webAnswer,
+        modelNote: m.modelNote,
+        ts: Date.now(),
+      }));
+      await useConvStore.getState().syncMessages(convId, wire);
+    } catch {
+      /* 服务端不可用时静默降级回 localStorage-only 模式 */
+    }
+  },
+
+  /** 从服务端加载一条历史对话（替换当前 messages） */
+  loadFromServer: async (convId: string) => {
+    const detail = await useConvStore.getState().openConv(convId);
+    if (!detail) return false;
+    const msgs: ChatMessage[] = (detail.messages || []).map((m) => ({
+      id: m.id,
+      role: m.role,
+      question: m.question,
+      text: m.text,
+      used: m.used ? new Set(m.used) : undefined,
+      aborted: m.aborted,
+      fallback: m.fallback,
+      webAnswer: m.webAnswer,
+      modelNote: m.modelNote,
+    }));
+    msgId = msgs.length ? Math.max(...msgs.map((m) => m.id)) : 0;
+    set({ messages: msgs });
+    localStorage.setItem(LS_KEY, serialize(msgs));
+    return true;
   },
 
   requestModelNote: async (msgId2) => {
@@ -348,6 +408,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }));
     }
     localStorage.setItem(LS_KEY, serialize(get().messages));
+    void get().syncToServer();
   },
 
   restore: () => {

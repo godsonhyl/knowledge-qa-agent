@@ -13,6 +13,7 @@ import type { DocMeta, ChunkMeta, ImportResult, BulkImportResult, DocSource, KbS
 
 export const COLLECTION_CHUNKS = ENV.COLLECTION_CHUNKS;
 export const COLLECTION_DOCS = ENV.COLLECTION_DOCS;
+export const COLLECTION_CONVS = ENV.COLLECTION_CONVS || 'kqa_conversations';
 
 const MAX_DOC_CHARS = 5 * 1024 * 1024; // 5MB = 与旧版单篇上限一致
 
@@ -52,6 +53,8 @@ export async function ensureCollections(): Promise<void> {
     await ensurePayloadIndex(COLLECTION_DOCS, ['name', 'source']);
     payloadIndexEnsured = true;
   }
+  // 对话历史 collection（伪向量 size 1，payload 存消息列表）
+  await ensureCollection(COLLECTION_CONVS, 1);
 }
 
 /** 按名字查文档（去重检查用） */
