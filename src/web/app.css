@@ -244,8 +244,13 @@ b { font-weight: 600; }
 .summary-section-title { margin: 12px 0 6px; font-size: 13px; color: var(--text-2); }
 .summary-toolbar { display: flex; gap: 6px; margin-bottom: 8px; }
 
-.kb-actions { display: flex; gap: 6px; margin-top: 4px; margin-bottom: 8px; }
-.kb-actions .btn { flex: 1; }
+.kb-actions {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin-top: 4px; margin-bottom: 8px;
+}
+/* 300px 侧栏一行塞不下 5 个按钮：允许换行、按钮不强行等分 */
+.kb-actions .btn,
+.kb-actions .t-button { flex: 0 1 auto; min-width: 0; padding-left: 9px; padding-right: 9px; }
 .btn-danger-armed {
   background: var(--danger); color: #fff; border: 1px solid var(--danger);
   font-weight: 600; animation: armPulse 1s ease-in-out infinite;
