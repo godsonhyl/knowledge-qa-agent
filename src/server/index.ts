@@ -16,6 +16,7 @@ import { webSearch } from './routes/webSearch.js';
 import { conversationsRoute } from './routes/conversations.js';
 import { feedbackRoute } from './routes/feedback.js';
 import { metricsRoute } from './routes/metrics.js';
+import { healthRoute } from './routes/health.js';
 import { authRoute } from './routes/auth.js';
 import { verifyAccessToken } from './oidc.js';
 import { verifyLocalJwt, isLocalJwt } from './users.js';
@@ -29,7 +30,7 @@ const app = new Hono();
 // ---- SSO/OIDC 鉴权 ----
 // 放行：/api/config（前端探测就绪）、/api/auth/*（登录流程本身）。
 // 受保护：其余 /api/*。OIDC_REQUIRED=0 时鉴权不强制（保留现状免鉴权），仅校验带了 token 的请求。
-const PUBLIC_PREFIXES = ['/api/config', '/api/auth'];
+const PUBLIC_PREFIXES = ['/api/config', '/api/auth', '/api/health'];
 async function authMiddleware(c: Context, next: () => Promise<void>): Promise<void | Response> {
   const path = new URL(c.req.url).pathname;
   if (PUBLIC_PREFIXES.some((p) => path === p || path.startsWith(p + '/'))) return next();
@@ -117,6 +118,7 @@ app.route('/api/web-search', webSearch);
 app.route('/api/conversations', conversationsRoute);
 app.route('/api/feedback', feedbackRoute);
 app.route('/api/metrics', metricsRoute);
+app.route('/api/health', healthRoute);
 app.get('/api/*', (c) => c.json({ error: 'not found' }, 404));
 app.get('*', staticHandler);
 

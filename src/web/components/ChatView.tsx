@@ -191,6 +191,7 @@ function Welcome({ config }: { config: ConfigResp | null }) {
 }
 
 function Message({ msg, config }: { msg: ChatMessage; config: ConfigResp | null }) {
+  const [showTrace, setShowTrace] = useState(false);
   if (msg.role === 'user') {
     return <div className="msg msg-user"><div className="bubble">{msg.question}</div></div>;
   }
@@ -200,6 +201,10 @@ function Message({ msg, config }: { msg: ChatMessage; config: ConfigResp | null 
   const fallbackAnswered = noEvidence && !!msg.text && !!msg.fallback;
   const webAnswered = noEvidence && !!msg.text && !!msg.webAnswer;
   const retrievalOnlyHit = !!search && search.hasEvidence && !msg.text;
+  // 引用密度：无引用句占比 > 0.4 且有有效引用时挂软警告（避免对没引用的答案误报）
+  const lowCitation = !!msg.text && !noEvidence && msg.citationGap !== undefined && msg.citationGap > 0.4
+    && !msg.fallback && !msg.webAnswer && !!msg.used && msg.used.size > 0;
+  const hasTrace = !!search?.trace;
 
   return (
     <div className="msg msg-bot">
@@ -224,7 +229,17 @@ function Message({ msg, config }: { msg: ChatMessage; config: ConfigResp | null 
             </span>
           )}
           {msg.aborted && <Tag theme="warning" variant="light" size="small">已中断</Tag>}
+          {hasTrace && (
+            <button
+              className="aa-btn trace-toggle"
+              title="检索链路追踪（改写变体/各路命中/证据门/耗时/拒答原因）"
+              onClick={() => setShowTrace((v) => !v)}
+            >{showTrace ? '🔧 收起' : '🔧 追踪'}</button>
+          )}
         </div>
+        {showTrace && hasTrace && search && (
+          <SearchTraceView trace={search.trace!} hits={msg.hits} />
+        )}
         {msg.searching && (
           <div className="answer thinking-placeholder">
             正在知识库中检索相关内容…
@@ -281,12 +296,20 @@ function Message({ msg, config }: { msg: ChatMessage; config: ConfigResp | null 
           {msg.text && !msg.streaming && !msg.aborted && (
             <AnswerActions msg={msg} />
           )}
+          {!msg.fallback && !msg.webAnswer && !msg.direct && !msg.aborted && msg.text && !msg.streaming && (
+            <Followups msg={msg} />
+          )}
           {!!msg.factIssues?.length && !msg.fallback && !msg.webAnswer && (
             <div className="notice notice-warn" title="答案中这些数字/IP/版本号在引用片段原文里没有找到，可能是模型转述有出入，请点击角标核对原文">
               <b>事实核对警告</b>：以下数值在引用原文中未找到依据，请核对：
               {msg.factIssues.map((f, i) => (
                 <code key={i} style={{ margin: '0 4px' }}>{f}</code>
               ))}
+            </div>
+          )}
+          {lowCitation && (
+            <div className="notice notice-warn" title="答案中部分结论句没有标注引用编号，可能并非全部来自知识库，建议核对">
+              <b>引用覆盖提示</b>：本回答有部分结论未标注引用编号（{msg.citationGap !== undefined ? Math.round((1 - msg.citationGap) * 100) : 0}% 句带引用），建议核对未标注部分是否确有原文依据。
             </div>
           )}
           {msg.aborted && !msg.text && (
@@ -302,6 +325,7 @@ function Message({ msg, config }: { msg: ChatMessage; config: ConfigResp | null 
   );
 }
 
+/** 联网搜索命中的来源列表（可点击，独立于证据卡） */
 /** 联网搜索命中的来源列表（可点击，独立于证据卡） */
 function WebSources({ msg }: { msg: ChatMessage }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -327,6 +351,40 @@ function WebSources({ msg }: { msg: ChatMessage }) {
           ))}
         </ol>
       )}
+    </div>
+  );
+}
+
+/** 跟进问题建议：依据命中片段 + 当前答案生成 3 个"你可能还想问"。
+ *  明确标注非知识库依据（LLM 组织的延伸建议）；点击即提问。 */
+function Followups({ msg }: { msg: ChatMessage }) {
+  const ask = useChatStore((s) => s.ask);
+  const streaming = useChatStore((s) => s.streaming);
+  if (msg.followupLoading) {
+    return (
+      <div className="followups followups-loading" title="生成跟进建议中…">
+        <span className="followups-label">你可能还想问…</span>
+        <span className="followups-spinner"></span>
+      </div>
+    );
+  }
+  if (!msg.followups?.length) return null;
+  return (
+    <div className="followups">
+      <div className="followups-label" title="由模型依据当前问答生成，非知识库依据；点击即提问，仍走正常检索流程">
+        你可能还想问
+      </div>
+      <div className="followups-list">
+        {msg.followups.map((q, i) => (
+          <button
+            key={i}
+            className="followup-chip"
+            disabled={streaming}
+            title={streaming ? '当前回答未结束' : '点击提问'}
+            onClick={() => { if (!streaming) void ask(q); }}
+          >{q}</button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -363,7 +421,6 @@ function AnswerActions({ msg }: { msg: ChatMessage }) {
   const [copied, setCopied] = useState(false);
   const [reneging, setReneging] = useState(false);
   const [voted, setVoted] = useState<'up' | 'down' | null>(null);
-  const [showTrace, setShowTrace] = useState(false);
 
   function copy() {
     const text = msg.text || '';
@@ -431,14 +488,6 @@ function AnswerActions({ msg }: { msg: ChatMessage }) {
           >👎</button>
         </>
       )}
-      {msg.search?.trace && (
-        <button
-          className="aa-btn"
-          title="检索链路追踪（改写变体/各路命中/证据门/耗时/拒答原因）"
-          onClick={() => setShowTrace((v) => !v)}
-        >{showTrace ? '🔧 收起' : '🔧 追踪'}</button>
-      )}
-      {showTrace && msg.search?.trace && <SearchTraceView trace={msg.search.trace} hits={msg.hits} />}
     </div>
   );
 }

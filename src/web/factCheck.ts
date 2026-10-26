@@ -33,36 +33,66 @@ export function extractHardFacts(text: string): string[] {
 export interface FactCheckResult {
   /** 找不到原文依据的"硬事实"（可能是模型编的） */
   unsupported: string[];
+  /** 引用密度：无引用句占比（0-1）；> 阈值时挂软警告，抓"整段陈述没标 [n]"的幻觉 */
+  citationGap: number;
+  /** 总句数（用于 UI 展示） */
+  sentenceCount: number;
+  /** 带引用的句数 */
+  citedSentenceCount: number;
 }
 
 /** 校验答案中的硬事实是否出现在引用片段原文中。
  *  slice 是该消息引用的 [n] 对应片段文本（按编号排序）。
  *  说明：启发式抽验，宽松匹配（原文出现该值即算支持），
- *  目标是抓"凭空编造的数字"，不做语义级核对。 */
+ *  目标是抓"凭空编造的数字"，不做语义级核对。
+ *  同时计算引用密度：把答案按句切，统计无引用句占比——
+ *  超过 0.4 时挂软警告，抓"整段散文陈述没标 [n]"的幻觉。 */
 export function verifyFacts(answer: string, citedTexts: string[]): FactCheckResult {
   // 去掉引用标记本身
   const clean = answer.replace(/\[\d{1,2}\]/g, ' ');
   const facts = extractHardFacts(clean);
-  if (!facts.length) return { unsupported: [] };
-
-  const corpus = citedTexts.join('\n');
-  const corpusLower = corpus.toLowerCase();
+  const sentences = splitSentences(answer);
+  const citedCount = sentences.filter((s) => /\[\d{1,2}\]/.test(s)).length;
+  const citationGap = sentences.length ? citedCount / sentences.length : 0;
 
   const unsupported: string[] = [];
-  for (const f of facts) {
-    const fl = f.toLowerCase();
-    if (corpusLower.includes(fl)) continue;
-    // 版本号形式的宽松匹配：主版本段出现即可（1.30.3 → 原文有 1.30 即算）
-    const vParts = fl.split('.');
-    if (vParts.length >= 2 && corpusLower.includes(vParts.slice(0, 2).join('.'))) continue;
-    // 纯数字 3-4 位且 < 200：常见归纳（如"约 50 微秒"换算、占比），豁免
-    const n = parseInt(f, 10);
-    if (/^\d{3,4}$/.test(f) && n < 200) continue;
-    // 带前导 0 或对端口不敏感的匹配
-    if (/^\d+$/.test(f) && corpusLower.includes(String(Number(f)))) continue;
-    unsupported.push(f);
+  if (facts.length) {
+    const corpus = citedTexts.join('\n');
+    const corpusLower = corpus.toLowerCase();
+
+    for (const f of facts) {
+      const fl = f.toLowerCase();
+      if (corpusLower.includes(fl)) continue;
+      // 版本号形式的宽松匹配：主版本段出现即可（1.30.3 → 原文有 1.30 即算）
+      const vParts = fl.split('.');
+      if (vParts.length >= 2 && corpusLower.includes(vParts.slice(0, 2).join('.'))) continue;
+      // 纯数字 3-4 位且 < 200：常见归纳（如"约 50 微秒"换算、占比），豁免
+      const n = parseInt(f, 10);
+      if (/^\d{3,4}$/.test(f) && n < 200) continue;
+      // 带前导 0 或对端口不敏感的匹配
+      if (/^\d+$/.test(f) && corpusLower.includes(String(Number(f)))) continue;
+      unsupported.push(f);
+    }
   }
   // 去重 & 截断（避免长答案产生海量误报刷屏）
   const uniq = [...new Set(unsupported)];
-  return { unsupported: uniq.slice(0, 5) };
+  return {
+    unsupported: uniq.slice(0, 5),
+    citationGap,
+    sentenceCount: sentences.length,
+    citedSentenceCount: citedCount,
+  };
+}
+
+/** 把答案切成句子（中英文句末标点 + 换行）。
+ *  引用密度统计用——粗切即可，目标是数"有几句话带了 [n]"。
+ *  注意：句末 `.` 必须不被数字包围（避免切 IP/版本/小数）。 */
+export function splitSentences(text: string): string[] {
+  // 句末标点切：中文 。！？ 总是切；英文 . ! ? 仅当后面非数字（避免 10.0.0.1 / v1.2 / 0.5 被切）
+  const raw = text
+    .replace(/\n+/g, '\n')
+    .split(/(?<=[。！？])\s*|(?<=[.!?])(?![\d])\s*|\n+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return raw;
 }

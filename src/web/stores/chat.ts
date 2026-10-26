@@ -3,7 +3,7 @@
    ============================================================ */
 import { create } from 'zustand';
 import type { SearchResult, Hit, WebSearchResult } from '@shared/types.js';
-import { SYSTEM_PROMPT, FALLBACK_SYSTEM_PROMPT, WEB_SEARCH_SYSTEM_PROMPT, REASON_TEXT } from '../qaPrompt.js';
+import { SYSTEM_PROMPT, FALLBACK_SYSTEM_PROMPT, WEB_SEARCH_SYSTEM_PROMPT, REASON_TEXT, FOLLOWUP_SYSTEM_PROMPT } from '../qaPrompt.js';
 import { validateCitations } from '../citations.js';
 import { verifyFacts } from '../factCheck.js';
 import { authHeaders, handleUnauthorized } from './auth.js';
@@ -37,6 +37,12 @@ export interface ChatMessage {
   webSearching?: boolean;
   /** 事实抽验：答案中在引用原文找不到依据的硬事实（数字/IP/版本） */
   factIssues?: string[];
+  /** 引用密度：无引用句占比过高时挂软警告（抓"整段陈述没标 [n]"的幻觉） */
+  citationGap?: number;
+  /** 跟进问题建议（LLM 依据命中片段+当前答案生成，非知识库依据；点击即提问） */
+  followups?: string[];
+  /** 跟进问题加载中（生成时 UI 显示占位） */
+  followupLoading?: boolean;
 }
 
 interface ChatState {
@@ -49,6 +55,8 @@ interface ChatState {
   requestModelNote: (msgId: number) => Promise<void>;
   /** 联网搜索兜底：拒答后用户主动触发，SearXNG → LLM → 标注非知识库依据 */
   webSearchAnswer: (msgId: number) => Promise<void>;
+  /** 跟进问题建议：依据命中片段+当前答案生成 3 个可点击即提问的"你可能还想问" */
+  genFollowups: (msgId: number) => Promise<void>;
   /** 把当前对话同步到服务端历史（失败静默降级 localStorage-only） */
   syncToServer: () => Promise<void>;
   /** 从服务端加载一条历史对话 */
@@ -66,6 +74,8 @@ function serialize(messages: ChatMessage[]): string {
     streaming: false,
     // 检索中的占位气泡不序列化（刷新后不残留"检索中"状态）
     searching: false,
+    // 跟进问题加载中也不序列化（刷新后重新生成）
+    followupLoading: false,
   })));
 }
 
@@ -295,12 +305,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const { used } = validateCitations(text, search.hits.length);
         // 事实抽验：答案中的硬事实（数字/IP/版本）必须在引用原文中可找到
         const citedTexts = search.hits.map((h) => `${h.docName}\n${h.text}`);
-        const { unsupported } = verifyFacts(text, citedTexts);
+        const { unsupported, citationGap } = verifyFacts(text, citedTexts);
         set((s) => ({
           messages: s.messages.map((m) => m.id === botId
-            ? { ...m, text, used, streaming: false, factIssues: unsupported.length ? unsupported : undefined }
+            ? { ...m, text, used, streaming: false, factIssues: unsupported.length ? unsupported : undefined, citationGap }
             : m),
         }));
+        // 跟进问题建议：异步生成 3 个"你可能还想问"（失败静默，不阻塞主流程）
+        void get().genFollowups(botId);
       } else {
         set((s) => ({
           messages: s.messages.map((m) => m.id === botId
@@ -411,6 +423,41 @@ export const useChatStore = create<ChatState>((set, get) => ({
     } catch (e: any) {
       set((s) => ({
         messages: s.messages.map((m) => m.id === msgId2 ? { ...m, modelNote: `⚠️ ${e?.message || e}` } : m),
+      }));
+    }
+  },
+
+  /** 跟进问题建议：依据命中片段 + 当前答案生成 3 个"你可能还想问"。
+   *  明确标注非知识库依据（LLM 自身组织，不保证可溯）；点击即提问。
+   *  失败静默——主流程已完成，跟进只是增强。 */
+  genFollowups: async (msgId2) => {
+    const msg = get().messages.find((m) => m.id === msgId2);
+    if (!msg || !msg.question || !msg.text || msg.followups || msg.followupLoading) return;
+    set((s) => ({
+      messages: s.messages.map((m) => m.id === msgId2 ? { ...m, followupLoading: true } : m),
+    }));
+    try {
+      const hitBrief = (msg.hits || []).slice(0, 3).map((h, i) =>
+        `${i + 1}. ${h.docName}${h.section ? ' › ' + h.section : ''}：${(h.text || '').slice(0, 120)}`).join('\n');
+      const userPrompt = `用户问题：${msg.question}\n\n已给出的回答（节选）：\n${(msg.text || '').slice(0, 600)}\n\n命中的知识库片段标题（供参考）：\n${hitBrief || '（无）'}\n\n请基于上述信息，生成 3 个用户可能想接着问的"跟进问题"，要求：1. 每个问题一句话，不超过 25 字。2. 与当前问题或回答有自然延伸关系（深挖某个点、对比、原因、操作步骤、影响范围）。3. 不要重复当前问题。4. 只输出问题，每行一个，不加编号不加引号。`;
+      const out = await callModel([
+        { role: 'system', content: FOLLOWUP_SYSTEM_PROMPT },
+        { role: 'user', content: userPrompt },
+      ], new AbortController().signal);
+      const raw = (out || '').trim();
+      // 解析为问题数组：按行切，去编号/引号/前导符号，过滤空行与超长行
+      const followups = raw.split(/\n+/)
+        .map((l) => l.replace(/^\s*[\d　-]+\s*[.、）)]?\s*/, '').replace(/^["'""]|["'""]$/g, '').trim())
+        .filter((l) => l.length >= 4 && l.length <= 60)
+        .slice(0, 3);
+      set((s) => ({
+        messages: s.messages.map((m) => m.id === msgId2
+          ? { ...m, followups: followups.length ? followups : undefined, followupLoading: false }
+          : m),
+      }));
+    } catch {
+      set((s) => ({
+        messages: s.messages.map((m) => m.id === msgId2 ? { ...m, followupLoading: false } : m),
       }));
     }
   },
