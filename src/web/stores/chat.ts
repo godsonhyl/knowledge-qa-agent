@@ -20,6 +20,8 @@ export interface ChatMessage {
   /** 引用校验结果 */
   used?: Set<number>;
   streaming?: boolean;
+  /** 检索阶段（服务端查知识库中，界面显示"检索知识库…"） */
+  searching?: boolean;
   aborted?: boolean;
   modelNote?: string;     // 拒答后"让模型补充说明"的文本
   /** 无据兜底：模型自身知识回答，非知识库依据 */
@@ -62,6 +64,8 @@ function serialize(messages: ChatMessage[]): string {
     ...m,
     used: m.used ? Array.from(m.used) : undefined,
     streaming: false,
+    // 检索中的占位气泡不序列化（刷新后不残留"检索中"状态）
+    searching: false,
   })));
 }
 
@@ -136,6 +140,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const { sensitivity, topK, retrievalOnly, fallbackOnNoEvidence } = cfg;
     const userMsg: ChatMessage = { id: ++msgId, role: 'user', question };
 
+    // ---- 立即回显：先上屏"检索知识库…"占位气泡，用户点提问马上有反馈 ----
+    const botId = ++msgId;
+    const placeholder: ChatMessage = {
+      id: botId, role: 'bot', question, searching: true,
+    };
+    set((s) => ({ messages: [...s.messages, userMsg, placeholder], streaming: true }));
+    localStorage.setItem(LS_KEY, serialize(get().messages));
+
     // 1. 检索（服务端做；可带知识库分组）
     // 多轮上下文：带上最近几轮问答，服务端 queryRewrite 用它解析指代
     // （"那它的基差呢" → "螺纹钢主力合约的基差"）
@@ -153,14 +165,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify(searchBody),
     });
-    if (searchR.status === 401) { handleUnauthorized(); return; }
+    if (searchR.status === 401) {
+      set((s) => ({ messages: s.messages.filter((m) => m.id !== botId), streaming: false }));
+      handleUnauthorized();
+      return;
+    }
     const search = await searchR.json() as SearchResult;
 
-    const botId = ++msgId;
-    const botMsg: ChatMessage = {
-      id: botId, role: 'bot', question, search, hits: search.hits, streaming: true,
-    };
-    set((s) => ({ messages: [...s.messages, userMsg, botMsg], }));
+    // 检索完成 → 替换占位气泡为正式 bot 消息（保留 id 以免 key 跳变）
+    set((s) => ({
+      messages: s.messages.map((m) => m.id === botId
+        ? { ...m, search, hits: search.hits, searching: false, streaming: true }
+        : m),
+    }));
     localStorage.setItem(LS_KEY, serialize(get().messages));
 
     // 2. 无据拒答路径
@@ -168,8 +185,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // 2a. 仅检索模式：不调 LLM，展示命中片段
       if (retrievalOnly) {
         set((s) => ({
-          messages: s.messages.map((m) => m.id === botId ? { ...m, streaming: false } : m),
+          messages: s.messages.map((m) => m.id === botId ? { ...m, streaming: false, searching: false } : m),
         }));
+        set({ streaming: false, abort: null });
         localStorage.setItem(LS_KEY, serialize(get().messages));
         return;
       }
@@ -209,8 +227,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
       // 2c. LLM 未就绪：直接显示拒答页
       set((s) => ({
-        messages: s.messages.map((m) => m.id === botId ? { ...m, streaming: false } : m),
+        messages: s.messages.map((m) => m.id === botId ? { ...m, streaming: false, searching: false } : m),
       }));
+      set({ streaming: false, abort: null });
       localStorage.setItem(LS_KEY, serialize(get().messages));
       return;
     }

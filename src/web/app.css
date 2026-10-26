@@ -1187,3 +1187,29 @@ b { font-weight: 600; }
 
 /* 证据卡头部按钮组 */
 .ev-head-btns { display: flex; gap: 6px; }
+
+/* ============================================================
+   提问后即时反馈：检索中占位气泡
+   ============================================================ */
+.thinking-placeholder {
+  color: var(--text-2);
+  font-size: 13.5px;
+  line-height: 1.8;
+  padding: 6px 0 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.thinking-placeholder::before {
+  content: '';
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--accent);
+  border-top-color: transparent;
+  border-radius: 50%;
+  flex-shrink: 0;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

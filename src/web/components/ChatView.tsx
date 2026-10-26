@@ -205,11 +205,16 @@ function Message({ msg, config }: { msg: ChatMessage; config: ConfigResp | null 
     <div className="msg msg-bot">
       <div className="bubble">
         <div className="bubble-head">
+          {msg.searching && (
+            <span className="badge plain" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <span className="pulse-indicator"><span className="indicator-dot"></span><span className="indicator-ring"></span></span>
+              检索知识库…
+            </span>
+          )}
           {noEvidence && !fallbackAnswered && !webAnswered && <Tag theme="danger" variant="light" size="small">未检索到依据</Tag>}
           {fallbackAnswered && <Tag theme="warning" variant="light" size="small">未检索到依据 · 模型兜底</Tag>}
           {webAnswered && <Tag theme="warning" variant="light" size="small">未检索到依据 · 联网搜索兜底</Tag>}
           {msg.direct && <Tag theme="success" variant="light" size="small">原文直达</Tag>}
-          {msg.marketDirect && <Tag theme="success" variant="light" size="small">行情直查</Tag>}
           {retrievalOnlyHit && <Tag theme="success" variant="light" size="small">已找到 {msg.hits?.length || 0} 条依据</Tag>}
           {msg.text && !noEvidence && <Tag theme="success" variant="light" size="small">已回答</Tag>}
           {msg.streaming && (
@@ -220,6 +225,11 @@ function Message({ msg, config }: { msg: ChatMessage; config: ConfigResp | null 
           )}
           {msg.aborted && <Tag theme="warning" variant="light" size="small">已中断</Tag>}
         </div>
+        {msg.searching && (
+          <div className="answer thinking-placeholder">
+            正在知识库中检索相关内容…
+          </div>
+        )}
         <div className="answer">
           {fallbackAnswered && (
             <div className="notice notice-warn">
