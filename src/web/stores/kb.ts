@@ -386,6 +386,17 @@ export const useKbStore = create<KbState>((set, get): KbState => ({
   pollDistillJob: () => {
     // 避免重复起轮询
     if (get().pollTimer) return;
+    // 先立即探一次（启动时若服务端正跑着，能马上显示进度，不用等 2s）
+    void (async () => {
+      try {
+        const r = await api<DistillJobView>('/api/kb/distill-status');
+        if (r.ok) {
+          set({ distillJob: r.data });
+          // 没在跑 → 不起定时轮询（避免空轮询）
+          if (!r.data.running) return;
+        }
+      } catch { /* 探失败则继续走定时轮询 */ }
+    })();
     const timer = setInterval(async () => {
       try {
         const r = await api<DistillJobView>('/api/kb/distill-status');

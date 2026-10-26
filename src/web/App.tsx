@@ -33,6 +33,9 @@ export function App() {
     if (!bootReady) return;
     void refresh();
     restore();
+    // 启动时探一次批量蒸馏任务——服务端可能正跑着（重启不丢任务状态），
+    // 有的话接上轮询显示进度条，避免用户看不到进行中的蒸馏。
+    void useKbStore.getState().pollDistillJob();
   }, [bootReady, refresh, restore]);
 
   if (config && ssoRequired && !isAuthed) {

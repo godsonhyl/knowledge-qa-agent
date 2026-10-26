@@ -12,6 +12,52 @@ import { EvidenceCard } from './EvidenceCard.js';
 import { RichText } from './RichText.js';
 import type { ConfigResp, SearchResult, Hit } from '@shared/types.js';
 
+function RateLimitNotice() {
+  // 429 限流：服务端返回 {error, retryAfter}。前端展示倒计时 + 禁用提问按钮。
+  const [retryAfter, setRetryAfter] = useState<number | null>(null);
+  const [reason, setReason] = useState<string>('');
+  const [, force] = useState(0);
+
+  // 监听全局 fetch 429：在 ask() / webSearchAnswer 里 throw 429 信息，这里不便挂钩——
+  // 改为：useChatStore 的 ask 捕获后写入此组件可见的 sessionStorage 标记，这里轮询。
+  // 简化：直接暴露一个 window 事件。
+  useEffect(() => {
+    function on429(e: Event) {
+      const d = (e as CustomEvent).detail || {};
+      setReason(d.reason || '已达使用上限');
+      setRetryAfter(d.retryAfter || 60);
+      force((n) => n + 1);
+    }
+    window.addEventListener('kqa:rate-limited', on429 as EventListener);
+    return () => window.removeEventListener('kqa:rate-limited', on429 as EventListener);
+  }, []);
+
+  // 倒计时
+  const [left, setLeft] = useState(0);
+  useEffect(() => {
+    if (retryAfter === null) return;
+    setLeft(retryAfter);
+    const t = setInterval(() => {
+      setLeft((n) => {
+        if (n <= 1) {
+          setRetryAfter(null);
+          clearInterval(t);
+          return 0;
+        }
+        return n - 1;
+      });
+    }, 1000);
+    return () => clearInterval(t);
+  }, [retryAfter]);
+
+  if (retryAfter === null) return null;
+  return (
+    <div className="rate-limit-notice" role="alert">
+      <b>⏳ {reason}</b> · 约 {left} 秒后恢复
+    </div>
+  );
+}
+
 export function ChatView() {
   const messages = useChatStore((s) => s.messages);
   const ask = useChatStore((s) => s.ask);
@@ -70,6 +116,7 @@ export function ChatView() {
       </div>
 
       <div className="composer-wrap">
+        <RateLimitNotice />
         <div className="composer">
           <textarea
             ref={taRef}
@@ -417,6 +464,7 @@ function EvidenceList({ msg }: { msg: ChatMessage }) {
 function AnswerActions({ msg }: { msg: ChatMessage }) {
   const ask = useChatStore((s) => s.ask);
   const webSearchAnswer = useChatStore((s) => s.webSearchAnswer);
+  const switchPrevVersion = useChatStore((s) => s.switchPrevVersion);
   const config = useConfigStore((s) => s.config);
   const [copied, setCopied] = useState(false);
   const [reneging, setReneging] = useState(false);
@@ -433,7 +481,8 @@ function AnswerActions({ msg }: { msg: ChatMessage }) {
   function regen() {
     if (reneging || useChatStore.getState().streaming) return;
     setReneging(true);
-    void ask(msg.question || '').finally(() => setReneging(false));
+    // 原位重新生成：保留历史版本到 prevTexts，不追加新消息
+    void ask(msg.question || '', { replaceMsgId: msg.id }).finally(() => setReneging(false));
   }
 
   function vote(fb: 'up' | 'down') {
@@ -459,9 +508,16 @@ function AnswerActions({ msg }: { msg: ChatMessage }) {
       <button className="aa-btn" onClick={copy} title="复制回答（含引用标记）">
         {copied ? '✓ 已复制' : '复制'}
       </button>
-      <button className="aa-btn" onClick={regen} disabled={reneging} title="用同样问题重新检索并作答">
+      <button className="aa-btn" onClick={regen} disabled={reneging} title="用同样问题重新检索并作答（旧答案保留为历史版本）">
         {reneging ? '生成中…' : '重新生成'}
       </button>
+      {!!msg.prevTexts?.length && (
+        <button
+          className="aa-btn"
+          title="切回上一版回答"
+          onClick={() => switchPrevVersion(msg.id, -1)}
+        >↶ 上一版</button>
+      )}
       {config?.webSearch && !msg.webAnswer && (
         <button
           className="aa-btn"

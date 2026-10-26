@@ -43,13 +43,15 @@ export interface ChatMessage {
   followups?: string[];
   /** 跟进问题加载中（生成时 UI 显示占位） */
   followupLoading?: boolean;
+  /** 重新生成时的历史版本（"上一版"切换用）；最新版仍在 text */
+  prevTexts?: string[];
 }
 
 interface ChatState {
   messages: ChatMessage[];
   streaming: boolean;
   abort: AbortController | null;
-  ask: (question: string) => Promise<void>;
+  ask: (question: string, opts?: { replaceMsgId?: number }) => Promise<void>;
   stop: () => void;
   newChat: () => void;
   requestModelNote: (msgId: number) => Promise<void>;
@@ -57,6 +59,8 @@ interface ChatState {
   webSearchAnswer: (msgId: number) => Promise<void>;
   /** 跟进问题建议：依据命中片段+当前答案生成 3 个可点击即提问的"你可能还想问" */
   genFollowups: (msgId: number) => Promise<void>;
+  /** 切换到上一版回答（重新生成时保留的历史版本） */
+  switchPrevVersion: (msgId: number, dir: -1 | 1) => void;
   /** 把当前对话同步到服务端历史（失败静默降级 localStorage-only） */
   syncToServer: () => Promise<void>;
   /** 从服务端加载一条历史对话 */
@@ -142,20 +146,31 @@ export const useChatStore = create<ChatState>((set, get) => ({
   streaming: false,
   abort: null,
 
-  ask: async (question) => {
+  ask: async (question, opts) => {
     const cfgStore = await import('./config.js');
     const cfg = cfgStore.useConfigStore.getState();
     if (get().streaming) return;
 
     const { sensitivity, topK, retrievalOnly, fallbackOnNoEvidence } = cfg;
+    const replaceMsgId = opts?.replaceMsgId;
     const userMsg: ChatMessage = { id: ++msgId, role: 'user', question };
 
     // ---- 立即回显：先上屏"检索知识库…"占位气泡，用户点提问马上有反馈 ----
-    const botId = ++msgId;
+    // 重新生成（replaceMsgId）模式：不新增用户消息，原位替换目标 bot 消息为占位气泡，
+    // 旧答案归档到 prevTexts 供"上一版"切换；检索/LLM 流程完全复用。
+    const botId = replaceMsgId ?? ++msgId;
+    const oldMsg = replaceMsgId ? get().messages.find((m) => m.id === replaceMsgId) : undefined;
+    const prevTexts = oldMsg?.text ? [...(oldMsg.prevTexts || []), oldMsg.text] : (oldMsg?.prevTexts || []);
     const placeholder: ChatMessage = {
       id: botId, role: 'bot', question, searching: true,
+      prevTexts: replaceMsgId ? prevTexts : undefined,
     };
-    set((s) => ({ messages: [...s.messages, userMsg, placeholder], streaming: true }));
+    set((s) => ({
+      messages: replaceMsgId
+        ? s.messages.map((m) => m.id === replaceMsgId ? placeholder : m)
+        : [...s.messages, userMsg, placeholder],
+      streaming: true,
+    }));
     localStorage.setItem(LS_KEY, serialize(get().messages));
 
     // 1. 检索（服务端做；可带知识库分组）
@@ -175,8 +190,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify(searchBody),
     });
+    if (searchR.status === 429) {
+      // 限流：通知前端展示倒计时；恢复占位气泡为旧答案（重新生成模式下）或移除
+      const d = await searchR.json().catch(() => ({}));
+      window.dispatchEvent(new CustomEvent('kqa:rate-limited', { detail: { reason: d?.error, retryAfter: d?.retryAfter } }));
+      if (replaceMsgId && oldMsg) {
+        set((s) => ({ messages: s.messages.map((m) => m.id === replaceMsgId ? { ...oldMsg, searching: false, streaming: false } : m), streaming: false }));
+      } else {
+        set((s) => ({ messages: s.messages.filter((m) => m.id !== botId), streaming: false }));
+      }
+      set({ abort: null });
+      return;
+    }
     if (searchR.status === 401) {
-      set((s) => ({ messages: s.messages.filter((m) => m.id !== botId), streaming: false }));
+      // 重新生成模式下 401：把占位气泡恢复成旧答案（不丢历史版本）
+      if (replaceMsgId && oldMsg) {
+        set((s) => ({
+          messages: s.messages.map((m) => m.id === replaceMsgId ? { ...oldMsg, searching: false, streaming: false } : m),
+          streaming: false,
+        }));
+      } else {
+        set((s) => ({ messages: s.messages.filter((m) => m.id !== botId), streaming: false }));
+      }
       handleUnauthorized();
       return;
     }
@@ -335,7 +370,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
     set({ streaming: false, abort: null });
     localStorage.setItem(LS_KEY, serialize(get().messages));
-    void get().syncToServer();
+    if (!replaceMsgId) void get().syncToServer();
+  },
+
+  /** 切换到上一版回答（重新生成保留的历史版本）。
+   *  dir=-1 回到上一版，dir=1 回到最新版（如果有 prevTexts）。 */
+  switchPrevVersion: (msgId, dir) => {
+    set((s) => ({
+      messages: s.messages.map((m) => {
+        if (m.id !== msgId) return m;
+        const prev = m.prevTexts || [];
+        if (!prev.length) return m;
+        // 当前 text 在 prevTexts 末尾的下一版（最新）；切换时把当前 text 推回 prevTexts
+        const curText = m.text || '';
+        const newPrev = [...prev, curText];
+        const targetIdx = dir === -1 ? newPrev.length - 2 : newPrev.length - 1;
+        if (targetIdx < 0 || targetIdx >= newPrev.length - 1) return m;
+        return { ...m, text: newPrev[targetIdx], prevTexts: newPrev.slice(0, targetIdx + 1) };
+      }),
+    }));
+    localStorage.setItem(LS_KEY, serialize(get().messages));
   },
 
   stop: () => {

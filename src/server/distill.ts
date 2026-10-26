@@ -5,6 +5,7 @@ import { ENV, llmReady } from './env.js';
 import { setChunkSummary, listChunks, KbError } from './kbStore.js';
 import { chunkIdFor } from './ids.js';
 import { kbIndex } from './kbIndex.js';
+import { invalidateRerankCache } from './rerank.js';
 import type { ChunkPayload } from './kbStore.js';
 
 export const DISTILL_SYSTEM_PROMPT =
@@ -66,6 +67,8 @@ export async function distillChunkInto(docId: string, index: number, chunk: Chun
   const updated = await setChunkSummary(docId, index, summary);
   if (!updated) throw new Error('写入知识点失败');
   kbIndex.updateChunk(chunkIdFor(docId, index), chunk.text, summary, chunk.docName);
+  // 蒸馏改变了 text+summary 的检索表征 → rerank 缓存排序可能失效，清掉
+  invalidateRerankCache();
   return summary;
 }
 
