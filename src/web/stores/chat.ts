@@ -137,7 +137,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const userMsg: ChatMessage = { id: ++msgId, role: 'user', question };
 
     // 1. 检索（服务端做；可带知识库分组）
+    // 多轮上下文：带上最近几轮问答，服务端 queryRewrite 用它解析指代
+    // （"那它的基差呢" → "螺纹钢主力合约的基差"）
+    const priorRounds = get().messages
+      .filter((m) => m.role === 'bot' && m.text && !m.aborted)
+      .slice(-3)
+      .map((m) => ({ question: m.question || '', answer: (m.text || '').slice(0, 500) }));
     const searchBody: Record<string, unknown> = { question, topK, sensitivity };
+    if (priorRounds.length) searchBody.history = priorRounds;
     // 当前选中的分组（如有）
     const groupSel = (await import('./config.js')).useConfigStore.getState().group;
     if (groupSel) searchBody.docNamePrefix = groupSel;

@@ -24,6 +24,7 @@ import { ENV, llmReady, confluenceReady as confluenceReadyFn } from '../env.js';
 import { writeKbBackup, listKbBackups, readKbBackup, pruneKbBackups } from '../backup.js';
 import { startDistillJob, stopDistillJob, distillJob } from '../distillJob.js';
 import { extractPdfText, PdfNoTextError } from '../pdf.js';
+import { extractDocxText, extractXlsxText, extractPptxText, NoTextError } from '../docParse.js';
 import type { DocSource } from '@shared/types.js';
 
 export const kb = new Hono();
@@ -163,23 +164,36 @@ kb.post('/docs/upload', async (c) => {
     return c.json({ error: '缺少 file 字段（二进制文件）' }, 400 as 400);
   }
   if (savedSize > PDF_MAX_BYTES) {
-    return c.json({ error: `文件过大，PDF 上限 500MB（收到 ${(savedSize / 1024 / 1024).toFixed(1)}MB）` }, 413 as 400);
+    return c.json({ error: `文件过大，上限 500MB（收到 ${(savedSize / 1024 / 1024).toFixed(1)}MB）` }, 413 as 400);
   }
-  if (!/\.pdf$/i.test(savedName)) {
-    return c.json({ error: 'upload 通道目前仅支持 .pdf；文本类请用 /api/kb/docs' }, 400 as 400);
+  // 支持的格式：PDF / DOCX / XLSX / PPTX（文本类 .txt/.md/.csv 走 /api/kb/docs JSON 通道）
+  const SUPPORTED_BINARY = /\.(pdf|docx|xlsx|pptx)$/i;
+  if (!SUPPORTED_BINARY.test(savedName)) {
+    return c.json({ error: 'upload 通道支持 .pdf/.docx/.xlsx/.pptx；纯文本类请用 /api/kb/docs' }, 400 as 400);
   }
 
-  // 解析：读临时文件 → unpdf 提取文本
+  // 解析：读临时文件 → 按扩展名分发提取器
   const { readFile } = await import('node:fs/promises');
   let text: string;
   try {
     const buf = new Uint8Array(await readFile(savedPath));
-    text = await extractPdfText(buf);
+    const ext = savedName.toLowerCase().split('.').pop() || '';
+    if (ext === 'pdf') {
+      text = await extractPdfText(buf);
+    } else if (ext === 'docx') {
+      text = await extractDocxText(buf);
+    } else if (ext === 'xlsx') {
+      text = await extractXlsxText(buf);
+    } else if (ext === 'pptx') {
+      text = await extractPptxText(buf);
+    } else {
+      return c.json({ error: `不支持的格式：.${ext}` }, 400 as 400);
+    }
   } catch (err) {
-    if (err instanceof PdfNoTextError) {
+    if (err instanceof PdfNoTextError || err instanceof NoTextError) {
       return c.json({ error: err.message }, 422 as 400);
     }
-    return c.json({ error: `PDF 解析失败：${String((err as Error)?.message || err)}` }, 422 as 400);
+    return c.json({ error: `文件解析失败：${String((err as Error)?.message || err)}` }, 422 as 400);
   } finally {
     unlink(savedPath, () => {});
     // rmdir 临时目录（Node 22 有 rm recursive）

@@ -4,7 +4,7 @@
 import { Hono } from 'hono';
 import { kbIndex } from '../kbIndex.js';
 import { hybridSearch } from '../search/hybrid.js';
-import { rewriteQuery } from '../queryRewrite.js';
+import { rewriteQuery, type HistoryTurn } from '../queryRewrite.js';
 import { classifyQuestion, mergeHits } from '../multiStep.js';
 import { isMarketQuery, tryMarketDirect } from '../marketData.js';
 import { recordSearch } from './metrics.js';
@@ -21,6 +21,10 @@ searchRoute.post('/search', async (c) => {
   // 知识库分组（可选）：按 docName 前缀或 source 收窄检索
   const docNamePrefix = typeof body.docNamePrefix === 'string' && body.docNamePrefix ? body.docNamePrefix : null;
   const source = typeof body.source === 'string' && body.source ? body.source : null;
+  // 多轮对话历史（前端传 priorRounds；用于 queryRewrite 解析指代"它/这个/上面提到的"）
+  const history: HistoryTurn[] = Array.isArray(body.history) && body.history.length
+    ? body.history.filter((h: any) => h && typeof h.question === 'string' && typeof h.answer === 'string').slice(-3)
+    : [];
   const started = Date.now();
 
   // ---- 行情数据直查通道（检索前优先判定；命中则跳过知识库检索）----
@@ -51,7 +55,7 @@ searchRoute.post('/search', async (c) => {
   // 查询改写：LLM 把问题扩展为多个同义/术语规范化变体；多路检索后用 RRF 二次融合。
   // 失败/超时静默降级为原问题单路检索（不影响主路径可用性）。
   const rewriteStart = Date.now();
-  const variants = await rewriteQuery(question, { sensitivity }).catch(() => [question]);
+  const variants = await rewriteQuery(question, { sensitivity, history }).catch(() => [question]);
   const rewriteMs = Date.now() - rewriteStart;
 
   // 复杂问题多步检索：LLM 判定复合问题 → 拆子问题 → 各自 hybridSearch → 合并。

@@ -45,6 +45,8 @@ interface KbState {
   /** PDF（二进制）走 multipart 上传，服务端 unpdf 解析 */
   uploadPdf: (file: File) => Promise<boolean>;
   uploadPdfs: (files: File[]) => Promise<void>;
+  /** 批量二进制上传（pdf/docx/xlsx/pptx 统一入口） */
+  uploadDocs: (files: File[]) => Promise<void>;
   importConfluence: (url: string, recursive: boolean) => Promise<void>;
   /** Confluence 增量同步：按版本号比对库内已导入页面，更新变更的 */
   syncConfluence: () => Promise<void>;
@@ -154,7 +156,7 @@ export const useKbStore = create<KbState>((set, get): KbState => ({
     await get().refresh();
   },
 
-  /** 单篇 PDF 上传：multipart → 服务端 unpdf 解析 → 复用 addDoc 链路 */
+  /** 单篇二进制文档上传（PDF/DOCX/XLSX/PPTX）：multipart → 服务端解析 → 复用 addDoc 链路 */
   uploadPdf: async (file) => {
     const MAX = 500 * 1024 * 1024;
     if (file.size > MAX) {
@@ -171,7 +173,7 @@ export const useKbStore = create<KbState>((set, get): KbState => ({
     if (res.ok) return true;
     if (res.status === 409) get().toast(`已跳过重复文档：${file.name}`);
     else if (res.status === 413) get().toast(`「${file.name}」超过 500MB 上限`, 'err');
-    else if (res.status === 422) get().toast(`「${file.name}」：${data?.error || 'PDF 解析失败'}`, 'err');
+    else if (res.status === 422) get().toast(`「${file.name}」：${data?.error || '文档解析失败'}`, 'err');
     else get().toast(`「${file.name}」导入失败：${data?.error || res.status}`, 'err');
     return false;
   },
@@ -183,8 +185,13 @@ export const useKbStore = create<KbState>((set, get): KbState => ({
       get().toast(`正在上传并解析：${f.name}`);
       if (await get().uploadPdf(f)) ok++;
     }
-    if (ok) get().toast(`已导入 ${ok} 篇 PDF`, 'ok');
+    if (ok) get().toast(`已导入 ${ok} 篇文档`, 'ok');
     await get().refresh();
+  },
+
+  /** 批量二进制上传（Dropzone 统一入口：pdf/docx/xlsx/pptx） */
+  uploadDocs: async (files) => {
+    await get().uploadPdfs(files);
   },
 
   importConfluence: async (url, recursive) => {

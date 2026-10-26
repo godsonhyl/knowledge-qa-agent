@@ -15,16 +15,34 @@ const REWRITE_SYSTEM = `你是一个搜索查询改写器。给定用户的问�
 2. 变体要互补：同义改写、术语规范化（口语→术语）、必要时拆成子问题。
 3. 必须包含原问题最关键的实体/术语，不要丢关键词。
 4. 中文问题输出中文变体，英文问题输出英文。
-5. 不超过 3 个变体。`;
+5. 不超过 3 个变体。
+6. 若提供了「对话历史」，且当前问题含指代词（它/这个/那/上面提到的），先用历史把指代解析成明确实体再改写——指代未解析的问题无法在知识库里检索到。`;
 
-/** 调 LLM 生成查询变体。失败时返回 [question]。 */
+/** 对话历史条目（queryRewrite 用来解析指代） */
+export interface HistoryTurn {
+  question: string;
+  answer: string;
+}
+
+/** 调 LLM 生成查询变体。失败时返回 [question]。
+ *  opts.history：对话历史——若当前问题含指代词，先用历史解析成明确实体再改写。 */
 export async function rewriteQuery(
   question: string,
-  _opts: { sensitivity?: number } = {},
+  _opts: { sensitivity?: number; history?: HistoryTurn[] } = {},
 ): Promise<string[]> {
   if (!llmReady()) return withSynonyms(question);
-  // 短问题（< 6 字）直接用词典扩展，不浪费 LLM 调用
-  if (question.length < 6) return withSynonyms(question);
+  // 短问题（< 6 字）直接用词典扩展，不浪费 LLM 调用；
+  // 但含指代词的短问题（"它的基差"）若给了历史，仍需 LLM 解析
+  const hasAnaphora = /\b(它|他|这个|那个|上面|之前|那|这)\b/.test(question) || /(它|他|这|那|上面|之前)/.test(question);
+  if (question.length < 6 && !(_opts.history?.length && hasAnaphora)) return withSynonyms(question);
+
+  // 构造含历史的 user prompt（指代解析）
+  let userContent = question;
+  if (_opts.history?.length) {
+    const hist = _opts.history.slice(-3).map((h, i) =>
+      `Q${i + 1}: ${h.question}\nA${i + 1}: ${h.answer}`).join('\n');
+    userContent = `【对话历史】\n${hist}\n\n【当前问题】\n${question}\n\n请基于历史解析当前问题中的指代（如有），再输出检索变体。`;
+  }
 
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), REWRITE_TIMEOUT_MS);
@@ -39,10 +57,10 @@ export async function rewriteQuery(
         model: ENV.LLM_MODEL,
         messages: [
           { role: 'system', content: REWRITE_SYSTEM },
-          { role: 'user', content: question },
+          { role: 'user', content: userContent },
         ],
         temperature: 0.3,
-        max_tokens: 120,
+        max_tokens: 2000,  // deepseek 系 reasoning 模型：reasoning 消耗 tokens，120 会掐掉 content
         stream: false,
       }),
       signal: ctrl.signal,
@@ -56,15 +74,17 @@ export async function rewriteQuery(
       .filter((l) => l && l.length >= 2 && l.length <= 80)
       .slice(0, 3);
     if (!variants.length) return withSynonyms(question);
-    // 去重 + 原问题一定在内（保证主路径召回不变）
-    const set = new Set<string>([question, ...variants.map((v) => v.toLowerCase())]);
-    const out = [question];
+    // 去重 + 原问题一定在内（保证主路径召回不变）；
+    // 但若历史解析出了明确实体（变体比原问题更具体），把解析后的变体也纳入
+    const out = new Set<string>([question.toLowerCase()]);
+    const result = [question];
     for (const v of variants) {
-      if (!set.has(v.toLowerCase())) continue;
-      if (v.toLowerCase() === question.toLowerCase()) continue;
-      out.push(v);
+      if (!out.has(v.toLowerCase()) && v.toLowerCase() !== question.toLowerCase()) {
+        out.add(v.toLowerCase());
+        result.push(v);
+      }
     }
-    return withSynonyms(question).concat(out).slice(0, 4);
+    return withSynonyms(question).concat(result.slice(1)).slice(0, 4);
   } catch {
     return withSynonyms(question);
   } finally {

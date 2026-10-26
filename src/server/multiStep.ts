@@ -44,7 +44,7 @@ export async function classifyQuestion(question: string): Promise<ClassifyResult
           { role: 'user', content: question },
         ],
         temperature: 0.1,
-        max_tokens: 200,
+        max_tokens: 2000,  // reasoning 模型兼容：reasoning 占 tokens，太小会掐掉 content
         stream: false,
       }),
       signal: ctrl.signal,

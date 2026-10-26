@@ -232,7 +232,10 @@ payload: kind:"doc", name, source, size, addedAt, text
 | 父子块（small-to-big） | `BM25Index.parentText`：命中子块前后各扩 1 块合并 → `Hit.parentText` 喂 LLM；引用定位仍用子块行号 | 索引未初始化时跳过（等下次 rebuild） |
 | 知识库分组 | `GET /api/kb/groups` 派生 + `/api/kb/search` 支持 `docNamePrefix`/`source`（Qdrant filter + BM25 后置裁剪） | 无分组参数 → 全库检索 |
 | 事实直查 | `phraseHit≥1 && topScore≥18` + 断崖式领先 → `directAnswer=true`；前端跳过 LLM 直接展示 | 不满足条件 → 正常走 LLM |
-| 复杂问题多步 | `multiStep.ts` `classifyQuestion`（2.5s 超时）拆 2-4 子问题，各自 `hybridSearch` → `mergeHits` 去重合并 | 失败/简单问题 → fast path 单路检索 |
+| 复杂问题多步 | `multiStep.ts` `classifyQuestion`（2.5s 超时，max_tokens=2000 reasoning 兼容）拆 2-4 子问题，各自 `hybridSearch` → `mergeHits` 去重合并 | 失败/简单问题 → fast path 单路检索 |
+| 多轮上下文（v2.6） | 前端 `chat.ts` 发 `history`（最近 3 轮 Q/A，A 截 500 字）→ `search.ts` 透传 → `queryRewrite` 用 LLM 解析指代（"它/这个/上面提到的"）后改写变体 | 无 history 或 LLM 失败 → 原问题单路检索 |
+| 多格式文档（v2.6） | `docParse.ts`：DOCX(mammoth) / XLSX(sheetjs→markdown 表格保形) / PPTX(jszip 解 a:t 文本)；`/docs/upload` 按 .ext 分发；Dropzone 接受 .docx/.xlsx/.pptx | 解析为空抛 `NoTextError` → 422 |
+| 表格保形蒸馏（v2.6） | `distill.ts` `isTableChunk` 检测 GFM `|` 表 / `<table>` → 用 `DISTILL_TABLE_SYSTEM_PROMPT` 要求保留 markdown 表格结构，提取关键字段 | 非表格 → 原 `DISTILL_SYSTEM_PROMPT` 概括 |
 | 索引增量 | `BM25Index.addDocChunks`/`removeDocChunks` 增量维护 df/avgLen/byDocIndex；单篇导入/删除不整库 rebuild | 索引未初始化时跳过 |
 | 检索链路追踪 | `SearchResult.trace`（变体/各路命中/证据门/耗时/拒答原因/通道）；前端 🔧 展开面板；`recordSearch` 聚合 `reasonCounts`/`channelCounts` 进 metrics | trace 未生成时面板不显示 |
 | 行情数据直查 | `marketData.ts`：`isMarketQuery` 关键词判定（排除定义类问题）→ 东财 push2 接口（直连 2.5s 失败退 Firecrawl rawHtml 9s）→ `directAnswer=true` 前端跳过 LLM；覆盖 7 个主流指数 | 接口失败/非行情问题 → 正常走知识库检索 |
@@ -278,7 +281,7 @@ payload: kind:"doc", name, source, size, addedAt, text
 | `tests/oidc.test.ts` | §13 SSO/OIDC + 本地账号：PKCE challenge、state 一次性消费、RS256 jwt（iss/aud/exp）校验、签名篡改；scrypt 密码往返/salt 唯一、HS256 签发/校验/过期/篡改 |
 | `scripts/e2e.mjs` | 对运行中的 stack：种子导入 + §4/§5 + 引用偏移往返 + chat SSE 透传 |
 
-**合入门槛**：任何检索层改动前先跑 `npm test`（69 全绿）；UI 改动后跑 `npm run typecheck` + `build`。
+**合入门槛**：任何检索层改动前先跑 `npm test`（77 全绿）；UI 改动后跑 `npm run typecheck` + `build`。
 
 ---
 

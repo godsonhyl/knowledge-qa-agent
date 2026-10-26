@@ -94,6 +94,16 @@ docker compose
 
 ## 变更记录
 
+## v2.6（2026-10）
+
+**第二批体验优化：多格式文档 + 表格保形 + 多轮上下文**
+- 多格式文档支持：新增 `docParse.ts`，上传通道扩展到 .docx（mammoth）/ .xlsx（sheetjs，sheet→markdown 表格保形）/ .pptx（jszip 解 a:t 文本）；Dropzone 与目录扫描均接受新格式；下游切块/嵌入/Qdrant 全复用 addDoc 链路
+- 表格保形蒸馏：`distill.ts` `isTableChunk` 检测 GFM `|` 表 / HTML `<table>` → 用 `DISTILL_TABLE_SYSTEM_PROMPT` 保留 markdown 表格结构提取关键字段，而非压扁成散文；表格类 chunk 蒸馏失败率下降
+- 多轮上下文：前端 `chat.ts` 把最近 3 轮 Q/A 随 `/api/kb/search` 发送 → `queryRewrite` 用 LLM 解析指代（"那它的涨跌幅呢" + 历史"中证1000" → "中证1000指数涨跌幅"）；回答 LLM 端已有 history+引用隔离
+- reasoning 模型兼容：`queryRewrite`/`classifyQuestion` 的 max_tokens 120/200 → 2000（deepseek 系 reasoning 消耗 tokens，太小会掐掉 content）
+- 新增 `tests/docMulti.test.ts`（8 用例：xlsx 保形/pptx 排序/表格检测），总 77 vitest 全绿
+- 契约见 [CONTRACTS.md §12 检索增强契约](./CONTRACTS.md#12-检索增强契约不破坏阈值)
+
 ## v2.5（2026-10）
 
 **第一批体验优化：检索链路追踪 + 行情数据直查 + 兜底可信度排序**

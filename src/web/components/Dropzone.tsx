@@ -3,6 +3,9 @@ import { UploadIcon, FolderOpenIcon } from 'tdesign-icons-react';
 import { useRef } from 'react';
 import { useKbStore } from '../stores/kb.js';
 
+/** 二进制文档（走 multipart 上传，服务端解析）：PDF / Word / Excel / PPT */
+const BIN_DOC_RE = /\.(pdf|docx|xlsx|pptx)$/i;
+
 export function Dropzone() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pasteRef = useRef<HTMLTextAreaElement>(null);
@@ -12,9 +15,9 @@ export function Dropzone() {
   async function handleFiles(list: FileList | null) {
     if (!list) return;
     const files: { name: string; text: string }[] = [];
-    const pdfs: File[] = [];
+    const binaries: File[] = [];
     for (const f of Array.from(list)) {
-      if (/\.pdf$/i.test(f.name)) { pdfs.push(f); continue; }
+      if (BIN_DOC_RE.test(f.name)) { binaries.push(f); continue; }
       if (f.size > 5 * 1024 * 1024) continue;
       let text = await f.text();
       if (/\.html?$/i.test(f.name)) {
@@ -28,7 +31,7 @@ export function Dropzone() {
       }
       files.push({ name: f.name, text });
     }
-    if (pdfs.length) await useKbStore.getState().uploadPdfs(pdfs);
+    if (binaries.length) await useKbStore.getState().uploadDocs(binaries);
     if (files.length) await importFiles(files);
   }
 
@@ -53,13 +56,13 @@ export function Dropzone() {
           ref={fileInputRef}
           type="file"
           multiple
-          accept=".txt,.md,.markdown,.json,.csv,.log,.py,.js,.ts,.java,.cpp,.h,.go,.yaml,.yml,.html,.css,.pdf,application/pdf"
+          accept=".txt,.md,.markdown,.json,.csv,.log,.py,.js,.ts,.java,.cpp,.h,.go,.yaml,.yml,.html,.css,.pdf,.docx,.xlsx,.pptx,application/pdf"
           style={{ display: 'none' }}
           onChange={(e) => { void handleFiles(e.target.files); e.target.value = ''; }}
         />
         <div className="dz-icon"><UploadIcon /></div>
         <div className="dz-main">拖入文件 或 点击选择</div>
-        <div className="dz-sub">支持 txt / md / 代码 / csv / pdf · 文本 ≤ 5MB · PDF ≤ 500MB</div>
+        <div className="dz-sub">支持 txt / md / 代码 / csv / pdf / docx / xlsx / pptx · 文本 ≤ 5MB · 二进制 ≤ 500MB</div>
       </div>
       <div className="paste-box">
         <Textarea
@@ -84,7 +87,7 @@ export function Dropzone() {
             try {
               const handle = await (window as any).showDirectoryPicker({ mode: 'read' });
               const collected: { name: string; text: string }[] = [];
-              const pdfs: File[] = [];
+              const binaries: File[] = [];
               async function walk(dir: any, prefix: string) {
                 for await (const [n, child] of dir.entries()) {
                   if (n.startsWith('.')) continue;
@@ -92,21 +95,22 @@ export function Dropzone() {
                   if (child.kind === 'directory') { await walk(child, rel); }
                   else if (child.kind === 'file') {
                     const ext = n.slice(n.lastIndexOf('.')).toLowerCase();
-                    if (!['.txt', '.md', '.csv', '.pdf'].includes(ext)) continue;
+                    const isBin = ['.pdf', '.docx', '.xlsx', '.pptx'].includes(ext);
+                    if (!isBin && !['.txt', '.md', '.csv'].includes(ext)) continue;
                     const f = await child.getFile();
-                    if (ext === '.pdf') {
+                    if (isBin) {
                       if (f.size > 500 * 1024 * 1024) continue;
-                      pdfs.push(f);
+                      binaries.push(f);
                     } else {
                       if (f.size > 5 * 1024 * 1024) continue;
                       collected.push({ name: rel, text: await f.text() });
                     }
-                    if (collected.length + pdfs.length >= 500) return;
+                    if (collected.length + binaries.length >= 500) return;
                   }
                 }
               }
               await walk(handle, '');
-              if (pdfs.length) await useKbStore.getState().uploadPdfs(pdfs);
+              if (binaries.length) await useKbStore.getState().uploadDocs(binaries);
               await useKbStore.getState().importDir(collected);
             } catch (e: any) {
               if (e?.name !== 'AbortError') useKbStore.getState().toast(`扫描失败：${e?.message || e}`, 'err');
