@@ -79,6 +79,7 @@ export function ViewerModal() {
         </div>
         {!editing ? (
           <div className="doc-viewer">
+            <ViewerSearch state={state} />
             <pre>
               {lines.map((line, i) => {
                 const n = i + 1;
@@ -136,6 +137,54 @@ export function ViewerModal() {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/** C4 文档内搜索：Ctrl+F 定位（浏览器原生不够：要高亮所有匹配 + 计数） */
+function ViewerSearch({ state }: { state: ViewerState }) {
+  const [q, setQ] = useState('');
+  const [idx, setIdx] = useState(0);
+  // 找到 q 的所有匹配行
+  const matchLines = q.trim()
+    ? state.text.split('\n')
+        .map((l, i) => ({ l, n: i + 1 }))
+        .filter(({ l }) => l.toLowerCase().includes(q.trim().toLowerCase()))
+    : [];
+  const canPrev = matchLines.length > 1;
+  const canNext = matchLines.length > 0;
+
+  function jump(dir: -1 | 1) {
+    const next = matchLines.length ? (idx + dir + matchLines.length) % matchLines.length : 0;
+    setIdx(next);
+    const target = matchLines[next]?.n;
+    if (target) {
+      const el = document.querySelector(`.doc-viewer pre > div:nth-child(${target})`);
+      el?.scrollIntoView({ block: 'center' });
+      el?.classList.add('hl-flash');
+      setTimeout(() => el?.classList.remove('hl-flash'), 900);
+    }
+  }
+
+  return (
+    <div className="viewer-search">
+      <input
+        value={q}
+        placeholder="文档内搜索…"
+        onChange={(e) => { setQ(e.target.value); setIdx(0); }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') { e.preventDefault(); jump(e.shiftKey ? -1 : 1); }
+        }}
+      />
+      {q.trim() && (
+        <>
+          <span className="viewer-search-count">
+            {matchLines.length ? `${idx + 1}/${matchLines.length} 行` : '无匹配'}
+          </span>
+          <button className="btn btn-sm btn-ghost" disabled={!canPrev} onClick={() => jump(-1)}>↑</button>
+          <button className="btn btn-sm btn-ghost" disabled={!canNext} onClick={() => jump(1)}>↓</button>
+        </>
+      )}
     </div>
   );
 }

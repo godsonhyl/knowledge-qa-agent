@@ -990,6 +990,35 @@ b { font-weight: 600; }
 }
 .doc-viewer .lc { white-space: pre-wrap; }
 
+/* C4 文档内搜索（ViewerModal 内） */
+.viewer-search {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  margin: -12px 0 4px;
+}
+.viewer-search input {
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 3px 8px;
+  font-size: 12px;
+  background: var(--panel-2);
+  color: var(--text);
+}
+.viewer-search input:focus { outline: none; border-color: var(--accent); }
+.viewer-search-count { font-size: 11px; color: var(--text-3); }
+.doc-viewer .hl-flash {
+  background: color-mix(in srgb, var(--warn, #ed7b2f) 25%, transparent) !important;
+  transition: background 0.9s;
+}
+
 /* 原文查看器：编辑模式（D1 文档更新） */
 .doc-viewer-edit {
   padding: 0;
