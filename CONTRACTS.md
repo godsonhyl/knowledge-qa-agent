@@ -234,6 +234,9 @@ payload: kind:"doc", name, source, size, addedAt, text
 | 事实直查 | `phraseHit≥1 && topScore≥18` + 断崖式领先 → `directAnswer=true`；前端跳过 LLM 直接展示 | 不满足条件 → 正常走 LLM |
 | 复杂问题多步 | `multiStep.ts` `classifyQuestion`（2.5s 超时）拆 2-4 子问题，各自 `hybridSearch` → `mergeHits` 去重合并 | 失败/简单问题 → fast path 单路检索 |
 | 索引增量 | `BM25Index.addDocChunks`/`removeDocChunks` 增量维护 df/avgLen/byDocIndex；单篇导入/删除不整库 rebuild | 索引未初始化时跳过 |
+| 检索链路追踪 | `SearchResult.trace`（变体/各路命中/证据门/耗时/拒答原因/通道）；前端 🔧 展开面板；`recordSearch` 聚合 `reasonCounts`/`channelCounts` 进 metrics | trace 未生成时面板不显示 |
+| 行情数据直查 | `marketData.ts`：`isMarketQuery` 关键词判定（排除定义类问题）→ 东财 push2 接口（直连 2.5s 失败退 Firecrawl rawHtml 9s）→ `directAnswer=true` 前端跳过 LLM；覆盖 7 个主流指数 | 接口失败/非行情问题 → 正常走知识库检索 |
+| 兜底来源可信度排序 | `webSearch.ts` `rankByCredibility`：域名白名单 +100（交易所/东财/官方）/黑名单 −50（UGC/内容农场）+ 引擎共识 +10×N；排序在抓取前（Top-N 抓最可信来源） | 排序失败退回 SearXNG 原序 |
 | 运维指标 | `GET /api/metrics` + `search.recordSearch` 上报；进程内存级（重启归零） | Qdrant 不可用时 stats 置零 |
 | 反馈数据 | `POST/GET /api/feedback`，Qdrant `kqa_feedback`，自动 prune 500 条 | — |
 
@@ -275,7 +278,7 @@ payload: kind:"doc", name, source, size, addedAt, text
 | `tests/oidc.test.ts` | §13 SSO/OIDC + 本地账号：PKCE challenge、state 一次性消费、RS256 jwt（iss/aud/exp）校验、签名篡改；scrypt 密码往返/salt 唯一、HS256 签发/校验/过期/篡改 |
 | `scripts/e2e.mjs` | 对运行中的 stack：种子导入 + §4/§5 + 引用偏移往返 + chat SSE 透传 |
 
-**合入门槛**：任何检索层改动前先跑 `npm test`（63 全绿）；UI 改动后跑 `npm run typecheck` + `build`。
+**合入门槛**：任何检索层改动前先跑 `npm test`（69 全绿）；UI 改动后跑 `npm run typecheck` + `build`。
 
 ---
 

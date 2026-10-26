@@ -68,6 +68,39 @@ export interface Hit {
   parentText?: string;
 }
 
+/** 检索链路追踪（每问一次的诊断信息；进程内存级，不持久化）。
+ *  用于答错时定位是改写/检索/证据门/LLM 哪个环节出问题。 */
+export interface SearchTrace {
+  /** 问题原文 */
+  question: string;
+  /** queryRewrite 输出的检索变体（含同义词扩展） */
+  variants: string[];
+  /** 复杂问题分类结果（简单问题不填） */
+  classification?: { complex: boolean; subQuestions: string[] };
+  /** BM25 词法通道命中数（主变体） */
+  lexHitCount: number;
+  /** 向量通道命中数 */
+  vecHitCount: number;
+  /** rerank 后保留的命中数 */
+  rerankedCount: number;
+  /** 是否走直查（事实直查 / 行情直查） */
+  directAnswer: boolean;
+  /** 证据门各通道判定（词法门 / 向量门） */
+  gate: { lex: boolean; vec: boolean };
+  /** 拒答原因（hasEvidence=false 时） */
+  reason: string;
+  /** 命中通道：kb 知识库 / market-data 行情直查 / web 联网兜底 */
+  channel?: 'kb' | 'market-data' | 'web';
+  /** 总检索耗时（ms） */
+  searchMs: number;
+  /** 查询改写耗时（ms） */
+  rewriteMs?: number;
+  /** 问题分类耗时（ms） */
+  classifyMs?: number;
+  /** rerank 耗时（ms） */
+  rerankMs?: number;
+}
+
 /** POST /api/kb/search 的完整返回 */
 export interface SearchResult {
   hits: Hit[];
@@ -88,6 +121,8 @@ export interface SearchResult {
   /** 事实直查：命中极强（phraseHit 且回答就在片段里）时为 true；
    *  前端跳过 LLM 直接展示片段，零幻觉零延迟。 */
   directAnswer?: boolean;
+  /** 检索链路追踪（诊断用；前端 🔧 展开显示） */
+  trace?: SearchTrace;
 }
 
 /** 知识库分组（用于检索时按范围收窄）。由 docName 前缀或手动 tag 派生。 */
@@ -134,6 +169,8 @@ export interface WebHit {
   content: string;
   /** 是否成功抓取了页面正文（firecrawl）；false 表示仅有 SearXNG 摘要 */
   scraped?: boolean;
+  /** SearXNG 命中该条的引擎列表（可信度排序用：多引擎共识=更可信） */
+  engines?: string[];
 }
 
 export interface WebSearchResult {

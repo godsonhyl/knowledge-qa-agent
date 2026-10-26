@@ -28,6 +28,8 @@ export interface ChatMessage {
   webAnswer?: boolean;
   /** 事实直查：命中极强未调 LLM，直接展示片段原文 */
   direct?: boolean;
+  /** 行情直查：行情类问题走东财 push2 接口，直接展示数据 */
+  marketDirect?: boolean;
   /** 联网搜索命中的来源（title+url，UI 展示） */
   webHits?: { title: string; url: string; content: string }[];
   webSearching?: boolean;
@@ -206,19 +208,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return;
     }
 
-    // 2d. 事实直查：命中极强（phraseHit + topScore 很高）→ 跳过 LLM，
+    // 2d. 事实/行情直查：命中极强（phraseHit + topScore 很高）→ 跳过 LLM，
     //     直接把片段文本当答案（零延迟零幻觉，引用定位照常）。
-    //     top1 命中且分数断崖式领先（第 2 名不到一半）才走直查。
+    //     行情直查：search.trace.channel === 'market-data'，hits[0].text 已是格式化行情文本。
+    //     top1 命中且分数断崖式领先（第 2 名不到一半）才走直查；行情直查只有 1 条 hit 无需断崖判定。
     if (search.directAnswer && search.hits.length) {
       const top = search.hits[0]!;
+      const isMarket = search.trace?.channel === 'market-data';
       const second = search.hits[1];
-      const cliffGap = !second || (second.fused < top.fused * 0.5);
+      const cliffGap = isMarket || !second || (second.fused < top.fused * 0.5);
       if (cliffGap) {
         const text = top.parentText || top.text;
         const used = new Set<number>([1]);
         set((s) => ({
           messages: s.messages.map((m) => m.id === botId
-            ? { ...m, text: `[1] ${text}`, used, streaming: false, direct: true }
+            ? { ...m, text: isMarket ? text : `[1] ${text}`, used, streaming: false, direct: !isMarket, marketDirect: isMarket }
             : m),
         }));
         localStorage.setItem(LS_KEY, serialize(get().messages));

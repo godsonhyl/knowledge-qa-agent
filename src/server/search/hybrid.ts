@@ -23,7 +23,7 @@ export async function hybridSearch(
   question: string,
   retriever: Retriever,
   opts: { topK?: number; sensitivity?: number; variants?: string[]; docNamePrefix?: string | null; source?: string | null },
-): Promise<SearchResult> {
+): Promise<SearchResult & { _trace: { lexHitCount: number; vecHitCount: number; rerankedCount: number; gate: { lex: boolean; vec: boolean }; rerankMs: number } }> {
   const topK = opts.topK || 8;
   const sensitivity = typeof opts.sensitivity === 'number' ? opts.sensitivity : 50;
   const variants = (opts.variants && opts.variants.length > 0) ? opts.variants : [question];
@@ -139,6 +139,7 @@ export async function hybridSearch(
 
   // kept：有证据时先取 top-N 候选（默认 max(topK*3, 20)），rerank 精排后截 topK
   let kept: Hit[] = [];
+  let rerankMs = 0;
   if (hasEvidence) {
     const rerankPool = all.filter((h) => {
       // 至少在某一通道有非零分
@@ -148,7 +149,9 @@ export async function hybridSearch(
     });
     const pool = rerankPool.slice(0, Math.max(topK * 3, 20));
     // rerank 精排（失败/未配置则退回 RRF 排序，截 topK）
+    const rerankStart = Date.now();
     const { hits: reranked } = await rerankHits(question, pool, topK);
+    rerankMs = Date.now() - rerankStart;
     kept = reranked;
     // 父块上下文（small-to-big）：取命中子块前后各 1 块合并文本，喂 LLM 用
     // 引用定位仍用子块 startLine/endLine（契约不动）
@@ -172,7 +175,7 @@ export async function hybridSearch(
     && lex.phraseHit >= 1
     && lex.topScore >= 18
     && !!kept.length;
-  return {
+  const result: SearchResult = {
     hits: kept,
     allScored: all.slice(0, topK),
     hasEvidence,
@@ -188,4 +191,14 @@ export async function hybridSearch(
     searchMs: Date.now() - started,
     directAnswer,
   };
+  // 附加追踪信息（不进 SearchResult 的对外 schema，供 search.ts 组装 trace 用）
+  return Object.assign(result, {
+    _trace: {
+      lexHitCount: lex.hits.length,
+      vecHitCount: vecHits.length,
+      rerankedCount: kept.length,
+      gate: { lex: lexGate, vec: vecGate },
+      rerankMs: rerankMs,
+    },
+  });
 }

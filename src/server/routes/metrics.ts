@@ -21,6 +21,10 @@ export interface Metrics {
     searchMsAvg: number;
     searchCount: number;
     refusalRate: number;
+    /** 拒答原因聚合（按 reason 分组计数）——区分"库没内容"vs"阈值卡住" */
+    reasonCounts: Record<string, number>;
+    /** 命中通道聚合：kb 知识库 / market-data 行情直查 */
+    channelCounts: Record<string, number>;
   };
 }
 
@@ -29,13 +33,18 @@ export const httpStats = {
   searchMsSum: 0,
   searchCount: 0,
   refusals: 0,
+  reasonCounts: {} as Record<string, number>,
+  channelCounts: {} as Record<string, number>,
 };
 
-export function recordSearch(searchMs: number, hasEvidence: boolean): void {
+/** 记录一次检索。reason 可选（用于拒答原因聚合）；channel 可选（行情直查 vs 知识库）。 */
+export function recordSearch(searchMs: number, hasEvidence: boolean, reason?: string, channel?: string): void {
   httpStats.total++;
   httpStats.searchCount++;
   httpStats.searchMsSum += searchMs;
   if (!hasEvidence) httpStats.refusals++;
+  if (reason) httpStats.reasonCounts[reason] = (httpStats.reasonCounts[reason] || 0) + 1;
+  if (channel) httpStats.channelCounts[channel] = (httpStats.channelCounts[channel] || 0) + 1;
 }
 
 export function recordRequest(): void {
@@ -71,6 +80,8 @@ metricsRoute.get('/', async (c) => {
       searchMsAvg: httpStats.searchCount ? Math.round(httpStats.searchMsSum / httpStats.searchCount) : 0,
       searchCount: httpStats.searchCount,
       refusalRate: httpStats.searchCount ? +(httpStats.refusals / httpStats.searchCount).toFixed(3) : 0,
+      reasonCounts: httpStats.reasonCounts,
+      channelCounts: httpStats.channelCounts,
     },
   };
   return c.json(m);

@@ -52,6 +52,16 @@ const SYNONYMS: SynonymEntry[] = [
   { canonical: 'UST', aliases: ['恒生ust', '恒生'] },
   { canonical: 'CATS', aliases: ['中信cats', '中信'] },
   { canonical: 'AGW', aliases: ['国君agw', '国君'] },
+
+  // ---- 行情术语（v2.5 新增） ----
+  { canonical: '上证指数', aliases: ['上证综指', '大盘指数', '沪市大盘', '000001'] },
+  { canonical: '深证成指', aliases: ['深成指', '深市大盘', '399001'] },
+  { canonical: '创业板指', aliases: ['创业板', '399006'] },
+  { canonical: '沪深300', aliases: ['沪深300指数', '000300'] },
+  { canonical: '中证1000', aliases: ['中证1000指数', '000852', 'IM现货'] },
+  { canonical: '中证500', aliases: ['中证500指数', '000905', 'IC现货'] },
+  { canonical: '收盘价', aliases: ['收盘点位', '收盘行情', '收盘'] },
+  { canonical: '行情数据', aliases: ['实时行情', '行情', '盘面'] },
 ];
 
 /** 查某个词的同组扩展词（含自身）。找不到返回空数组。 */

@@ -10,7 +10,7 @@ import { authHeaders } from '../stores/auth.js';
 import { REASON_TEXT } from '../qaPrompt.js';
 import { EvidenceCard } from './EvidenceCard.js';
 import { RichText } from './RichText.js';
-import type { ConfigResp } from '@shared/types.js';
+import type { ConfigResp, SearchResult } from '@shared/types.js';
 
 export function ChatView() {
   const messages = useChatStore((s) => s.messages);
@@ -209,6 +209,7 @@ function Message({ msg, config }: { msg: ChatMessage; config: ConfigResp | null 
           {fallbackAnswered && <Tag theme="warning" variant="light" size="small">未检索到依据 · 模型兜底</Tag>}
           {webAnswered && <Tag theme="warning" variant="light" size="small">未检索到依据 · 联网搜索兜底</Tag>}
           {msg.direct && <Tag theme="success" variant="light" size="small">原文直达</Tag>}
+          {msg.marketDirect && <Tag theme="success" variant="light" size="small">行情直查</Tag>}
           {retrievalOnlyHit && <Tag theme="success" variant="light" size="small">已找到 {msg.hits?.length || 0} 条依据</Tag>}
           {msg.text && !noEvidence && <Tag theme="success" variant="light" size="small">已回答</Tag>}
           {msg.streaming && (
@@ -233,6 +234,11 @@ function Message({ msg, config }: { msg: ChatMessage; config: ConfigResp | null 
           {msg.direct && (
             <div className="notice notice-info">
               <b>原文直达</b>：这个问题命中了高置信片段，未调用大模型，直接展示原文（点击 [1] 角标可定位行号）。
+            </div>
+          )}
+          {msg.marketDirect && (
+            <div className="notice notice-info">
+              <b>行情直查</b>：命中行情数据接口（东方财富 push2），未调用大模型，直接展示最新快照。收盘时段为收盘价，盘中为实时值；精确历史收盘请以交易所官网为准。
             </div>
           )}
           {(noEvidence && !fallbackAnswered && !webAnswered) && <NoEvidence msg={msg} config={config} />}
@@ -339,6 +345,7 @@ function AnswerActions({ msg }: { msg: ChatMessage }) {
   const [copied, setCopied] = useState(false);
   const [reneging, setReneging] = useState(false);
   const [voted, setVoted] = useState<'up' | 'down' | null>(null);
+  const [showTrace, setShowTrace] = useState(false);
 
   function copy() {
     const text = msg.text || '';
@@ -405,6 +412,54 @@ function AnswerActions({ msg }: { msg: ChatMessage }) {
             onClick={() => vote('down')}
           >👎</button>
         </>
+      )}
+      {msg.search?.trace && (
+        <button
+          className="aa-btn"
+          title="检索链路追踪（改写变体/各路命中/证据门/耗时/拒答原因）"
+          onClick={() => setShowTrace((v) => !v)}
+        >{showTrace ? '🔧 收起' : '🔧 追踪'}</button>
+      )}
+      {showTrace && msg.search?.trace && <SearchTraceView trace={msg.search.trace} />}
+    </div>
+  );
+}
+
+/** 检索链路追踪面板（🔧 展开）：改写变体 / 各路命中 / 证据门 / 耗时 / 拒答原因 */
+function SearchTraceView({ trace }: { trace: NonNullable<SearchResult['trace']> }) {
+  const rows: [string, string][] = [
+    ['通道', trace.channel || 'kb'],
+    ['证据门', `词法:${trace.gate.lex ? '✓' : '✗'}  向量:${trace.gate.vec ? '✓' : '✗'}`],
+    ['词法命中', String(trace.lexHitCount)],
+    ['向量命中', String(trace.vecHitCount)],
+    ['rerank 保留', String(trace.rerankedCount)],
+    ['直查', trace.directAnswer ? '是' : '否'],
+    ['拒答原因', trace.reason],
+    ['总耗时', `${trace.searchMs}ms`],
+  ];
+  if (trace.rewriteMs !== undefined) rows.push(['改写耗时', `${trace.rewriteMs}ms`]);
+  if (trace.classifyMs !== undefined) rows.push(['分类耗时', `${trace.classifyMs}ms`]);
+  if (trace.rerankMs !== undefined) rows.push(['rerank 耗时', `${trace.rerankMs}ms`]);
+  return (
+    <div className="trace-panel">
+      <table className="trace-table">
+        <tbody>
+          {rows.map(([k, v]) => (
+            <tr key={k}><td className="trace-k">{k}</td><td className="trace-v">{v}</td></tr>
+          ))}
+        </tbody>
+      </table>
+      {trace.variants.length > 1 && (
+        <div className="trace-variants">
+          <span className="trace-k">改写变体：</span>
+          {trace.variants.map((v, i) => <code key={i}>{v}</code>)}
+        </div>
+      )}
+      {trace.classification?.complex && (
+        <div className="trace-variants">
+          <span className="trace-k">子问题：</span>
+          {trace.classification.subQuestions.map((v, i) => <code key={i}>{v}</code>)}
+        </div>
       )}
     </div>
   );

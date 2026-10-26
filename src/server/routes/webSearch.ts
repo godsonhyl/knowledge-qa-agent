@@ -63,13 +63,18 @@ webSearch.post('/', async (c) => {
     ? (data.unresponsive_engines as any[]).map((e: any) => String(e?.engine || e?.name || e).slice(0, 40))
     : [];
 
-  // 方案 A：摘要截断放宽到 SNIPPET_MAX
+  // 方案 A：摘要截断放宽到 SNIPPET_MAX。保留 engines 供可信度排序用。
   const hits: WebHit[] = results.slice(0, limit).map((r) => ({
     title: String(r?.title || '').slice(0, 200),
     url: String(r?.url || '').slice(0, 500),
     content: String(r?.content || '').slice(0, SNIPPET_MAX),
     scraped: false,
+    engines: Array.isArray(r?.engines) ? (r.engines as any[]).map((e) => String(e)).slice(0, 6) : undefined,
   }));
+
+  // 来源可信度排序：权威域名优先（交易所/官网/主流财经 > 二手聚合/UGC），
+  // 引擎共识数作加分（多引擎命中=更可信）。放在抓取前——让 Top-N 正文抓取落在最可信来源上。
+  rankByCredibility(hits);
 
   // 方案 B：对 Top-N 抓取正文（若配置了 FIRECRAWL_URL）
   const fcBase = ENV.FIRECRAWL_URL.replace(/\/+$/, '');
@@ -150,4 +155,79 @@ async function scrapeRaw(fcBase: string, url: string): Promise<string | null> {
   } finally {
     clearTimeout(timer);
   }
+}
+
+/* ============================================================
+   来源可信度排序（#6）：权威域名 + 引擎共识
+   - 域名白名单 +100（交易所/官网/主流财经媒体）
+   - 域名黑名单 -50（UGC 论坛/内容农场/二手百科）
+   - 引擎共识 +10×N（多引擎同时命中 = 交叉验证）
+   - SearXNG 原序作平局打破（不整体丢弃引擎排序信号）
+   ============================================================ */
+
+/** 金融/通用权威域名（含子域名匹配） */
+const CREDIBLE_DOMAINS = [
+  'sse.com.cn',        // 上交所
+  'szse.cn',           // 深交所
+  'csindex.com.cn',    // 中证指数
+  'cffex.com.cn',      // 中金所
+  'eastmoney.com',     // 东方财富
+  '10jqka.com.cn',     // 同花顺
+  'sina.com.cn',       // 新浪财经
+  'stcn.com',          // 证券时报
+  'cs.com.cn',         // 中国证券报
+  'yicai.com',         // 第一财经
+  'cls.cn',            // 财联社
+  'yahoo.com',
+  'moomoo.com',
+  'gov.cn',            // 政府站点
+  'github.com',        // 技术文档（官方仓库）
+  'stackoverflow.com',
+  'developer.mozilla.org',
+];
+
+/** UGC/内容农场/二手聚合（金融数据不可靠或用户生成） */
+const LESS_CREDIBLE_DOMAINS = [
+  'csdn.net',
+  'zhihu.com',
+  'xueqiu.com',
+  'baidu.com',         // 百科/百家号
+  '163.com',
+  'sohu.com',
+  'weibo.com',
+  'tieba.baidu.com',
+  '360doc.com',
+  '51cto.com',
+];
+
+function domainOf(url: string): string {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+/** 单条命中可信度评分（稳定排序用） */
+function credibilityScore(h: WebHit, originalIdx: number): number {
+  const domain = domainOf(h.url);
+  let score = 0;
+  for (const d of CREDIBLE_DOMAINS) {
+    if (domain === d || domain.endsWith('.' + d)) { score += 100; break; }
+  }
+  for (const d of LESS_CREDIBLE_DOMAINS) {
+    if (domain === d || domain.endsWith('.' + d)) { score -= 50; break; }
+  }
+  // 引擎共识：多引擎同时命中 = 交叉验证加分
+  if (h.engines?.length) score += h.engines.length * 10;
+  // SearXNG 原序作微小平局打破（index 越小加分越多，不足以压过域名权重）
+  score -= originalIdx * 0.01;
+  return score;
+}
+
+/** 就地按可信度排序（稳定；白名单域名 > 引擎共识多 > 原序） */
+export function rankByCredibility(hits: WebHit[]): void {
+  const scored = hits.map((h, i) => ({ h, i, s: credibilityScore(h, i) }));
+  scored.sort((a, b) => b.s - a.s || a.i - b.i);
+  for (let k = 0; k < hits.length; k++) hits[k] = scored[k]!.h;
 }
