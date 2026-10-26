@@ -2,7 +2,7 @@
 
 本文件集中记录**不可随意改动**的契约与**必须遵守**的规范。这些是产品正确性的硬约束：改阈值会破坏检索回归、改引用规则会破坏溯源联动、改回答规范会改变产品定位。
 
-> 改动任何一条前，先跑 `npm test`（44 vitest）。`tests/evidence.test.ts` 的 §4/§5 是检索阈值的字面回归。
+> 改动任何一条前，先跑 `npm test`（98 vitest）。`tests/evidence.test.ts` 的 §4/§5 是检索阈值的字面回归。
 
 ---
 
@@ -242,8 +242,24 @@ payload: kind:"doc", name, source, size, addedAt, text
 | 兜底来源可信度排序 | `webSearch.ts` `rankByCredibility`：域名白名单 +100（交易所/东财/官方）/黑名单 −50（UGC/内容农场）+ 引擎共识 +10×N；排序在抓取前（Top-N 抓最可信来源） | 排序失败退回 SearXNG 原序 |
 | 运维指标 | `GET /api/metrics` + `search.recordSearch` 上报；进程内存级（重启归零） | Qdrant 不可用时 stats 置零 |
 | 反馈数据 | `POST/GET /api/feedback`，Qdrant `kqa_feedback`，自动 prune 500 条 | — |
+| 引用密度校验（v2.9） | `factCheck.ts` `splitSentences` + `citationGap`（带引用句/总句数）；<60% 挂软警告「引用覆盖提示」，抓"整段散文陈述没标 [n]"的幻觉；句切分避开 IP/版本号里的英文点（10.0.0.1 / v1.2 不被误切） | 无句末标点的单句答案不触发 |
+| 跟进问题建议（v2.9） | `chat.ts genFollowups`：答案完成后异步 LLM 生成 3 个"你可能还想问"（`FOLLOWUP_SYSTEM_PROMPT`，≤25 字/个），标注非知识库依据，点击即提问走正常检索流程；失败静默 | LLM 不可用/超时 → 不显示 chips |
+| rerank 结果缓存（v2.9） | `rerank.ts` 按 `(query, sorted chunkIds, topK)` 缓存排序后 chunkId 顺序 + rel，TTL 5min/上限 200；重新生成同问题从 ~3s 降到 <10ms；distill/导入/删除/清空时 `invalidateRerankCache()` 主动失效（chunk 表征变了） | 缓存 miss → 调网关（与无缓存同） |
+| 重新生成原地替换（v2.9） | `ask(q, {replaceMsgId})` 原位替换 bot 气泡（同 message id，React key 不跳变），旧答案归档 `msg.prevTexts`；"上一版"按钮切回历史版本；401/429 恢复旧答案不丢历史 | replaceMsgId 不存在 → 退化为新增消息 |
+| 429 限流 UX（v2.9） | search 429 时派发 `kqa:rate-limited` 事件（带 `retryAfter`），ChatView `RateLimitNotice` 顶部倒计时"约 X 秒后恢复"；重新生成模式下 429 恢复旧答案 | 事件丢失 → 仍走原 error toast |
+| 嵌入向量缓存（v2.10） | `embeddings.ts` 按 `sha256(EMBED_MODEL+text)` 缓存向量到 `kqa_embed_cache` collection（伪向量存 payload.vector）；未命中才调网关，结果异步写回；缓存 key 含 model+dim，换模型自动失效；distill 只改 summary 时 text 向量复用 | 缓存故障/未命中 → 调网关（不影响正确性） |
+| 文档内容更新（v2.10） | `PUT /api/kb/docs/:docId` 复用 `updateDocContent` 删旧块→重新切块嵌入→upsert，保留 docId（chunk id UUIDv5 docId:index 派生幂等，对话历史 hitRefs 不失效）；ViewerModal 编辑模式（✎ → textarea → 二次确认）；清 rerank 缓存 + BM25 rebuild + 审计 | docId 不存在 → 404 |
 
 证据门以主变体判定为准（变体只扩召回，不放宽门）。
+
+## 12.1 运维与可观测契约（v2.9 增）
+
+| 契约 | 实现 |
+|---|---|
+| **依赖健康探针** | `GET /api/health` 分别探 Qdrant/LLM/嵌入/SearXNG/Firecrawl 各自可达性（带 ms，3s 超时）；整体 `ok` 由 Qdrant 决定（主链路依赖），其他降级标 `ok=false` 但不挂 503；**公开免鉴权**供外部监控直接打 |
+| **未配置占位** | 未启用的依赖返回 `{ok:false, ms:0, detail:"未配置"}`，不算挂 |
+| **判定口径** | 2xx/3xx/4xx 算可达（4xx 常是鉴权问题但服务在），5xx/连接失败/超时算不可达 |
+| **distill 进度自接** | App 启动时探一次 `/api/kb/distill-status`，服务端正跑则接上 2s 轮询显示进度条（重启不丢任务状态）；`pollDistillJob` 先立即探一次再起定时器 |
 
 ## 13. SSO/OIDC 鉴权契约
 
@@ -279,9 +295,14 @@ payload: kind:"doc", name, source, size, addedAt, text
 | `tests/pdf.test.ts` | §PDF-1 可解析 PDF 提取原文；§PDF-2 无文字层抛 `PdfNoTextError` |
 | `tests/factCheck.test.ts` | §FC-1 数字在原文无警告；§FC-2 IP 无依据挂警告；§FC-3 版本主段豁免；§FC-4 只看被引用片段 |
 | `tests/oidc.test.ts` | §13 SSO/OIDC + 本地账号：PKCE challenge、state 一次性消费、RS256 jwt（iss/aud/exp）校验、签名篡改；scrypt 密码往返/salt 唯一、HS256 签发/校验/过期/篡改 |
+| `tests/citationDensity.test.ts`（v2.9） | §CD-1 引用密度：全带引用=1、多无引用<0.6、零引用=0；splitSentences 不误切 IP/版本号；与 unsupported 互不影响 |
+| `tests/health.test.ts`（v2.9） | §H-1 探针判定（<500 ok，≥500 不可达）；§H-2 未配置占位 |
+| `tests/rerankCache.test.ts`（v2.9） | §RC-1 rerank 缓存 key 稳定性 + chunkIds 集合相同即同 key + topK 维度区分 + invalidate 清空 |
+| `tests/embedCache.test.ts`（v2.10） | §EC-1 嵌入缓存 key 幂等 + 换模型失效 + embedInputFor 参与 key |
+| `tests/docUpdate.test.ts`（v2.10） | §DU-1 更新后切块行号对齐 + chunk id 派生幂等 + 切块常量契约不退化 |
 | `scripts/e2e.mjs` | 对运行中的 stack：种子导入 + §4/§5 + 引用偏移往返 + chat SSE 透传 |
 
-**合入门槛**：任何检索层改动前先跑 `npm test`（80 全绿）；UI 改动后跑 `npm run typecheck` + `build`。
+**合入门槛**：任何检索层改动前先跑 `npm test`（98 全绿）；UI 改动后跑 `npm run typecheck` + `build`。
 
 ---
 

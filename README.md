@@ -94,6 +94,27 @@ docker compose
 
 ## 变更记录
 
+## v2.10（2026-10）
+
+**第七批：嵌入向量缓存 + 文档内容更新（保留 docId）**
+- 嵌入向量缓存：`embed()` 按 `sha256(EMBED_MODEL+text)` 查 `kqa_embed_cache` collection，未命中才调网关，结果异步写回；缓存 key 含 model+dim，换模型自动失效。distill 只改 summary 时 text 向量复用，恢复备份不重复嵌入；上限 20000 条超过整体清；`clearAll` 一并清缓存
+- 文档内容更新 `PUT /api/kb/docs/:docId`：复用 `updateDocContent` 删旧块→重新切块嵌入→upsert，**保留 docId**（chunk id UUIDv5 docId:index 派生幂等，对话历史 hitRefs 不失效）；ViewerModal 增编辑模式（✎ → textarea → 二次确认"蒸馏知识点会丢"）；清 rerank 缓存 + BM25 rebuild + 审计
+- 新增 `tests/embedCache.test.ts`（4 用例）+ `tests/docUpdate.test.ts`（3 用例），总 98 vitest 全绿
+
+## v2.9（2026-10）
+
+**第五、六批：可信度+体验+可观测 九项打包**
+- 引用密度校验：`factCheck` 增 `splitSentences` + `citationGap`（带引用句占比），<60% 挂软警告「引用覆盖提示」，抓"整段散文没标 [n]"的幻觉；句切分避开 IP/版本号里的英文点
+- 跟进问题建议：答案完成后异步 LLM 生成 3 个"你可能还想问"（`FOLLOWUP_SYSTEM_PROMPT`，≤25 字），标注非知识库依据，点击即提问
+- 依赖健康探针 `GET /api/health`：分别探 Qdrant/LLM/嵌入/SearXNG/Firecrawl 各自可达性（带 ms），整体由 Qdrant 决定；公开免鉴权供外部监控打
+- 🔧 追踪按钮前置到 `bubble-head`：检索返回即可点开看 trace，不必等 LLM 流完
+- rerank 结果缓存：按 `(query, sorted chunkIds, topK)` 缓存排序后 chunkId 顺序，TTL 5min/上限 200；重新生成从 ~3s 降到 <10ms；distill/导入/删除/清空时主动失效
+- 重新生成原地替换：`ask(q, {replaceMsgId})` 原位替换 bot 气泡（同 message id），旧答案归档 `prevTexts`；"上一版"按钮切回历史版本；401/429 恢复旧答案
+- 429 限流 UX：search 429 派发 `kqa:rate-limited` 事件，`RateLimitNotice` 顶部倒计时"约 X 秒后恢复"
+- distill 进度自接：App 启动探一次 `/api/kb/distill-status`，服务端正跑则接上轮询显示进度条（重启不丢任务状态）
+- 新增 `tests/citationDensity.test.ts`(5) + `health.test.ts`(2) + `rerankCache.test.ts`(4)，总 91 vitest 全绿
+- 契约见 [CONTRACTS.md §12 检索增强表](./CONTRACTS.md#12-检索增强契约不破坏阈值) + [§12.1 运维与可观测](./CONTRACTS.md#121-运维与可观测契约v29-增)
+
 ## v2.8.1（2026-10）
 
 **按产品决策移除行情/基差直查通道**
