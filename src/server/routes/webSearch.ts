@@ -95,7 +95,12 @@ webSearch.post('/', async (c) => {
   });
 });
 
-/** 调用自托管 Firecrawl /v2/scrape 抓取页面正文（markdown），失败返回 null */
+/** 调用自托管 Firecrawl /v2/scrape 抓取页面正文。
+ *  策略（按 web-search skill 指引）：
+ *  - 先用 markdown 抓；若返回的 metadata.contentType 是 JSON/API（application/json 等），
+ *    说明 Firecrawl 把 JSON 当网页做了 markdown 转换，转义会毁掉数据——改用 rawHtml 重抓。
+ *  - 这避免行情/API 端点被抓成"被转义的 json 代码围栏"。
+ *  失败/超时返回 null。 */
 async function scrapePage(fcBase: string, url: string): Promise<string | null> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), SCRAPE_TIMEOUT_MS);
@@ -109,9 +114,37 @@ async function scrapePage(fcBase: string, url: string): Promise<string | null> {
     if (!res.ok) return null;
     const d: any = await res.json().catch(() => null);
     if (!d?.success) return null;
+    // JSON/API 端点：markdown 会把 JSON 转义毁掉，改用 rawHtml 取原始响应体
+    const ct = String(d?.data?.metadata?.contentType || d?.metadata?.contentType || '').toLowerCase();
+    if (ct.includes('json') || (ct.startsWith('text/plain') && /\.(json|api)/.test(url))) {
+      const raw = await scrapeRaw(fcBase, url);
+      if (raw) return raw;
+    }
     const md = d?.data?.markdown || d?.markdown || '';
-    // 过滤极短/无意义内容
     return md.length > 80 ? md : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** 用 rawHtml 格式抓取原始响应体（不经 markdown 转换，保留 JSON 原貌）。 */
+async function scrapeRaw(fcBase: string, url: string): Promise<string | null> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), SCRAPE_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${fcBase}/v2/scrape`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, formats: ['rawHtml'] }),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) return null;
+    const d: any = await res.json().catch(() => null);
+    if (!d?.success) return null;
+    const raw = d?.data?.rawHtml || d?.rawHtml || '';
+    return raw.length > 40 ? raw : null;
   } catch {
     return null;
   } finally {
