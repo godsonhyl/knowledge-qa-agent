@@ -25,13 +25,15 @@ export function App() {
     void loadConfig();
   }, [loadConfig]);
 
-  // 强制鉴权 + 未登录：只渲染登录页，不触发任何受保护 API
+  // boot 加载要在 config 就绪后、且「已登录或不需要登录」时执行。
+  // ssoRequired=false（默认免鉴权）→ 直接加载；ssoRequired=true 且未登录 → 只渲染登录页，不触发受保护 API。
   const ssoRequired = !!config?.sso?.required;
+  const bootReady = !!config && (!ssoRequired || isAuthed);
   useEffect(() => {
-    if (!ssoRequired || isAuthed) return;
+    if (!bootReady) return;
     void refresh();
     restore();
-  }, [refresh, restore, ssoRequired, isAuthed]);
+  }, [bootReady, refresh, restore]);
 
   if (config && ssoRequired && !isAuthed) {
     return <LoginPage sso={config.sso} required />;
