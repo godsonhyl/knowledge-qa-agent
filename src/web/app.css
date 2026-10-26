@@ -242,6 +242,21 @@ b { font-weight: 600; }
 .summary-group .sg-value { font-size: 18px; font-weight: 600; color: var(--text); }
 .summary-group .sg-sub { font-size: 11px; color: var(--text-3); }
 .summary-section-title { margin: 12px 0 6px; font-size: 13px; color: var(--text-2); }
+
+/* 反馈弹层：tab 切换 */
+.fb-tabs { display: flex; gap: 4px; margin: 10px 0 6px; border-bottom: 1px solid var(--border); }
+.fb-tab {
+  padding: 4px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12.5px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.fb-tab.on { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+.fb-tab:hover { color: var(--text); }
 .summary-toolbar { display: flex; gap: 6px; margin-bottom: 8px; }
 
 /* ---------------- 工具条：文字按钮（主）+ 图标按钮（次），一行紧凑排版 ---------------- */
@@ -1294,6 +1309,47 @@ b { font-weight: 600; }
   font-size: 12.5px;
   text-align: center;
 }
+
+/* ============================================================
+   提问历史下拉（B3）：聚焦提问框时显示最近问过的问题
+   ============================================================ */
+.composer-with-history { position: relative; }
+.qhistory-picker {
+  position: absolute;
+  left: 0; right: 0;
+  bottom: 100%;
+  margin-bottom: 4px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 -4px 16px rgba(0,0,0,0.08);
+  max-height: 260px;
+  overflow-y: auto;
+  z-index: 20;
+  padding: 4px 0;
+}
+.qhistory-head {
+  font-size: 11px;
+  color: var(--text-3);
+  padding: 2px 12px 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 2px;
+}
+.qhistory-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 5px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 12.5px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.qhistory-item:hover { background: var(--td-bg-color-container-active, rgba(0,0,0,0.04)); }
 
 /* ============================================================
    提问后即时反馈：检索中占位气泡

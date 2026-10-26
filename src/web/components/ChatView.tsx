@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Switch, Button, Tag } from 'tdesign-react';
 import { SunnyIcon, MoonIcon, MapInformationIcon as MapIcon, TipsIcon, SearchIcon, VerifiedIcon, QuoteIcon, SecuredIcon, LinkIcon, ServerIcon } from 'tdesign-icons-react';
-import { useChatStore, type ChatMessage } from '../stores/chat.js';
+import { useChatStore, type ChatMessage, listQuestionHistory } from '../stores/chat.js';
 import { useConfigStore } from '../stores/config.js';
 import { useKbStore } from '../stores/kb.js';
 import { useCiteStore } from '../stores/cite.js';
@@ -71,6 +71,7 @@ export function ChatView() {
   const docsCount = useKbStore((s) => s.docs.length);
 
   const [input, setInput] = useState('');
+  const [showHistory, setShowHistory] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
 
@@ -129,7 +130,7 @@ export function ChatView() {
 
       <div className="composer-wrap">
         <RateLimitNotice />
-        <div className="composer">
+        <div className="composer composer-with-history">
           <textarea
             ref={taRef}
             rows={1}
@@ -140,6 +141,8 @@ export function ChatView() {
               e.target.style.height = 'auto';
               e.target.style.height = Math.min(e.target.scrollHeight, 168) + 'px';
             }}
+            onFocus={() => setShowHistory(true)}
+            onBlur={() => setTimeout(() => setShowHistory(false), 150)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
@@ -147,6 +150,12 @@ export function ChatView() {
               }
             }}
           ></textarea>
+          {showHistory && (
+            <QuestionHistoryPicker
+              onPick={(q) => { setInput(q); taRef.current?.focus(); }}
+              filter={input.trim()}
+            />
+          )}
           <div className="composer-actions">
             {streaming && <Button variant="text" size="small" onClick={stop}>停止</Button>}
             <Button
@@ -160,6 +169,28 @@ export function ChatView() {
         <p className="disclaimer">优先依据知识库检索片段作答；知识库无依据时拒答或联网兜底，兜底回答明确标注非知识库依据，请以引用原文为准。</p>
       </div>
     </main>
+  );
+}
+
+/** 提问历史下拉（B3）：聚焦提问框时显示最近问过的问题，点击即复用 */
+function QuestionHistoryPicker({ onPick, filter }: { onPick: (q: string) => void; filter: string }) {
+  const history = listQuestionHistory();
+  const shown = filter
+    ? history.filter((q) => q.toLowerCase().includes(filter.toLowerCase())).slice(0, 10)
+    : history.slice(0, 10);
+  if (!shown.length) return null;
+  return (
+    <div className="qhistory-picker" onMouseDown={(e) => e.preventDefault()}>
+      <div className="qhistory-head">最近问过</div>
+      {shown.map((q, i) => (
+        <button
+          key={i}
+          className="qhistory-item"
+          title="点击复用"
+          onClick={() => onPick(q)}
+        >{q}</button>
+      ))}
+    </div>
   );
 }
 
@@ -260,6 +291,15 @@ function Message({ msg, config }: { msg: ChatMessage; config: ConfigResp | null 
   const fallbackAnswered = noEvidence && !!msg.text && !!msg.fallback;
   const webAnswered = noEvidence && !!msg.text && !!msg.webAnswer;
   const retrievalOnlyHit = !!search && search.hasEvidence && !msg.text;
+  // 答案置信度：基于 rerank rel 与命中数判定（A4）。低置信度主动提示核对原文。
+  // 高：top1 rel>0.8 且 ≥2 命中；中：top1 rel>0.5；低：仅向量门命中且 rel<0.5。
+  const topRel = msg.hits?.[0]?.rel ?? 0;
+  const hitCount = msg.hits?.length || 0;
+  const confidence: 'high' | 'mid' | 'low' | null = !msg.text || noEvidence || msg.fallback || msg.webAnswer
+    ? null
+    : topRel >= 0.8 && hitCount >= 2 ? 'high'
+    : topRel >= 0.5 ? 'mid'
+    : 'low';
   // 引用密度：无引用句占比 > 0.4 且有有效引用时挂软警告（避免对没引用的答案误报）
   const lowCitation = !!msg.text && !noEvidence && msg.citationGap !== undefined && msg.citationGap > 0.4
     && !msg.fallback && !msg.webAnswer && !!msg.used && msg.used.size > 0;
@@ -281,6 +321,14 @@ function Message({ msg, config }: { msg: ChatMessage; config: ConfigResp | null 
           {msg.direct && <Tag theme="success" variant="light" size="small">原文直达</Tag>}
           {retrievalOnlyHit && <Tag theme="success" variant="light" size="small">已找到 {msg.hits?.length || 0} 条依据</Tag>}
           {msg.text && !noEvidence && <Tag theme="success" variant="light" size="small">已回答</Tag>}
+          {confidence && (
+            <Tag
+              theme={confidence === 'high' ? 'success' : confidence === 'mid' ? 'primary' : 'warning'}
+              variant="light"
+              size="small"
+              title={`置信度：${confidence === 'high' ? '高（top1 相关度 ≥0.8 且多源一致）' : confidence === 'mid' ? '中（top1 相关度 ≥0.5）' : '低（仅向量门命中且相关度 <0.5），建议核对原文'}`}
+            >{confidence === 'high' ? '高可信' : confidence === 'mid' ? '中可信' : '低可信'}</Tag>
+          )}
           {msg.streaming && (
             <span className="badge plain" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
               <span className="pulse-indicator"><span className="indicator-dot"></span><span className="indicator-ring"></span></span>
@@ -369,6 +417,11 @@ function Message({ msg, config }: { msg: ChatMessage; config: ConfigResp | null 
           {lowCitation && (
             <div className="notice notice-warn" title="答案中部分结论句没有标注引用编号，可能并非全部来自知识库，建议核对">
               <b>引用覆盖提示</b>：本回答有部分结论未标注引用编号（{msg.citationGap !== undefined ? Math.round((1 - msg.citationGap) * 100) : 0}% 句带引用），建议核对未标注部分是否确有原文依据。
+            </div>
+          )}
+          {confidence === 'low' && (
+            <div className="notice notice-warn" title="仅向量门命中且 top1 相关度 <0.5，建议核对原文">
+              <b>低置信度提示</b>：本回答依据的片段相关度较低（top1 rel={topRel.toFixed(2)}），可能不是最贴合的依据，建议点击角标核对原文或换用更精确的术语重问。
             </div>
           )}
           {msg.aborted && !msg.text && (

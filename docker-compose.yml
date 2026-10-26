@@ -56,6 +56,9 @@ services:
       RATE_LIMIT_PER_HOUR: "${RATE_LIMIT_PER_HOUR:-0}"
       RATE_LIMIT_BURST: "${RATE_LIMIT_BURST:-0}"
       AUDIT_LOG_ENABLED: "${AUDIT_LOG_ENABLED:-0}"
+      # ---- 告警 webhook（可选）：/api/health 不健康时 POST 通知 ----
+      ALERT_WEBHOOK_URL: "${ALERT_WEBHOOK_URL:-}"
+      ALERT_DEBOUNCE_SEC: "${ALERT_DEBOUNCE_SEC:-300}"
       BACKUP_DIR: "/app/backups"
       BACKUP_INTERVAL_MS: "${BACKUP_INTERVAL_MS:-86400000}"
       # ---- 可选：自签 HTTPS（解锁浏览器安全上下文）----

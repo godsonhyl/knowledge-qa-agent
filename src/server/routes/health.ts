@@ -4,6 +4,9 @@
    各自可达性（带 ms），运维排障时一眼定位是哪个依赖挂了。
    公开端点（免鉴权）——外部监控可直接打；不暴露任何 key。
    整体健康 = Qdrant 可达（其他降级不影响主链路可用性，标 ok=false 但不挂 503）。
+
+   v2.11 增告警 webhook（D3）：整体 ok=false 时，若配了 ALERT_WEBHOOK_URL，
+   POST 一条告警（带哪个 dep 挂了）；ALERT_DEBOUNCE_SEC 防同一故障刷屏。
    ============================================================ */
 import { Hono } from 'hono';
 import { ENV, llmReady, embedReady, webSearchReady, confluenceReady, rerankReady, oidcReady, localAuthReady } from '../env.js';
@@ -65,6 +68,11 @@ healthRoute.get('/', async (c) => {
   // 整体健康：Qdrant 是主链路依赖（检索/对话都靠它）；其他降级不影响主链路可用性
   const overall = qdrant.ok;
 
+  // 告警 webhook（D3）：整体不健康且配了 webhook 时发告警；防抖避免刷屏
+  if (!overall && ENV.ALERT_WEBHOOK_URL) {
+    void fireAlertIfDue(overall, { qdrant, llm, embed, searxng, firecrawl });
+  }
+
   return c.json({
     ok: overall,
     uptimeSec: Math.round(process.uptime()),
@@ -85,3 +93,30 @@ healthRoute.get('/', async (c) => {
     },
   }, overall ? 200 : 503);
 });
+
+/* ---- 告警 webhook（D3）---- */
+let lastAlertTs = 0;
+let lastAlertFingerprint = '';
+async function fireAlertIfDue(overall: boolean, deps: { qdrant: Probe; llm: Probe; embed: Probe; searxng: Probe; firecrawl: Probe }): Promise<void> {
+  // 防抖：同一故障指纹在 ALERT_DEBOUNCE_SEC 内不重复发
+  const down = Object.entries(deps).filter(([, p]) => !p.ok).map(([k]) => k).join(',');
+  const now = Date.now();
+  if (down === lastAlertFingerprint && now - lastAlertTs < ENV.ALERT_DEBOUNCE_SEC * 1000) return;
+  lastAlertFingerprint = down;
+  lastAlertTs = now;
+  const payload = {
+    text: `[kqa 告警] 整体不健康 · down: ${down || '(unknown)'} · uptime ${Math.round(process.uptime())}s`,
+    overall,
+    downDeps: down,
+    deps: Object.fromEntries(Object.entries(deps).map(([k, p]) => [k, { ok: p.ok, ms: p.ms, detail: p.detail }])),
+    ts: now,
+  };
+  try {
+    await fetch(ENV.ALERT_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(5000),
+    });
+  } catch { /* webhook 失败不影响 health 探针本身 */ }
+}

@@ -81,6 +81,10 @@ export interface Env {
   RATE_LIMIT_BURST: number;
   /** 审计日志：是否记录用户操作（提问/删除/清空等）到 kqa_audit collection。默认 0=关 */
   AUDIT_LOG_ENABLED: boolean;
+  /** 告警 webhook（可选）：/api/health 整体 ok=false 时 POST 通知，配合外部监控。
+   *  ALERT_DEBOUNCE_SEC 防同一故障刷屏（默认 300s）。 */
+  ALERT_WEBHOOK_URL: string;
+  ALERT_DEBOUNCE_SEC: number;
 }
 
 export const ENV: Env = {
@@ -129,6 +133,8 @@ export const ENV: Env = {
   RATE_LIMIT_PER_HOUR: int(process.env.RATE_LIMIT_PER_HOUR, 0),
   RATE_LIMIT_BURST: int(process.env.RATE_BURST || process.env.RATE_LIMIT_BURST, 0),
   AUDIT_LOG_ENABLED: bool(process.env.AUDIT_LOG_ENABLED, false),
+  ALERT_WEBHOOK_URL: (process.env.ALERT_WEBHOOK_URL || '').replace(/\/+$/, ''),
+  ALERT_DEBOUNCE_SEC: int(process.env.ALERT_DEBOUNCE_SEC, 300),
 };
 
 export function llmReady(): boolean {

@@ -71,7 +71,27 @@ interface ChatState {
 }
 
 const LS_KEY = 'kqa.chat.v2';
+/** 提问历史（前端聚合，去重，最多 100 条）——提问框聚焦时下拉展示 */
+const HISTORY_KEY = 'kqa.questionHistory.v1';
 let msgId = 0;
+
+/** 把一个问题加入提问历史（去重 + 截 100） */
+function pushQuestionHistory(q: string) {
+  if (!q.trim()) return;
+  try {
+    const arr: string[] = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+    const idx = arr.indexOf(q);
+    if (idx >= 0) arr.splice(idx, 1);
+    arr.unshift(q);
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(arr.slice(0, 100)));
+  } catch { /* ignore */ }
+}
+
+/** 读提问历史（最近的在前） */
+export function listQuestionHistory(): string[] {
+  try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]') as string[]; }
+  catch { return []; }
+}
 
 function serialize(messages: ChatMessage[]): string {
   return JSON.stringify(messages.slice(-30).map((m) => ({
@@ -156,6 +176,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const { sensitivity, topK, retrievalOnly, fallbackOnNoEvidence } = cfg;
     const replaceMsgId = opts?.replaceMsgId;
     const userMsg: ChatMessage = { id: ++msgId, role: 'user', question };
+    if (!replaceMsgId) pushQuestionHistory(question);   // 重新生成不重复入历史
 
     // ---- 立即回显：先上屏"检索知识库…"占位气泡，用户点提问马上有反馈 ----
     // 重新生成（replaceMsgId）模式：不新增用户消息，原位替换目标 bot 消息为占位气泡，
