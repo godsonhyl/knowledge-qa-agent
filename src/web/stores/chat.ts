@@ -61,6 +61,8 @@ interface ChatState {
   genFollowups: (msgId: number) => Promise<void>;
   /** 切换到上一版回答（重新生成时保留的历史版本） */
   switchPrevVersion: (msgId: number, dir: -1 | 1) => void;
+  /** 导出当前对话为 markdown / json（纯前端，触发浏览器下载） */
+  exportConversation: (format: 'md' | 'json') => void;
   /** 把当前对话同步到服务端历史（失败静默降级 localStorage-only） */
   syncToServer: () => Promise<void>;
   /** 从服务端加载一条历史对话 */
@@ -390,6 +392,73 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }),
     }));
     localStorage.setItem(LS_KEY, serialize(get().messages));
+  },
+
+  /** 导出当前对话为 markdown / json，触发浏览器下载。
+   *  markdown：问题 + 答案 + 引用清单 + 联网来源，便于分享/审计；
+   *  json：完整 ChatMessage 结构（含 hits 摘要），便于备份/再导入。
+   *  纯前端实现，零服务端调用。 */
+  exportConversation: (format) => {
+    const msgs = get().messages;
+    if (!msgs.length) return;
+    const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    const firstQ = msgs.find((m) => m.role === 'user' && m.question)?.question || '对话';
+    const safeName = String(firstQ).slice(0, 30).replace(/[\\/:*?"<>|]/g, '_');
+    let content: string;
+    let mime: string;
+    let ext: string;
+    if (format === 'json') {
+      // json：序列化为可重新 loadFromServer 的形态（去掉 transient 字段）
+      content = JSON.stringify(msgs.map((m) => ({
+        id: m.id, role: m.role, question: m.question, text: m.text,
+        hitRefs: m.hits?.map((h) => ({ docName: h.docName, section: h.section, startLine: h.startLine, endLine: h.endLine })),
+        used: m.used ? Array.from(m.used) : undefined,
+        aborted: m.aborted, fallback: m.fallback, webAnswer: m.webAnswer,
+        webHits: m.webHits, modelNote: m.modelNote, direct: m.direct,
+      })), null, 2);
+      mime = 'application/json';
+      ext = 'json';
+    } else {
+      // markdown：人类可读的对话记录
+      const lines: string[] = [`# 知识问答 Agent · 对话导出`, ``, `> 导出时间：${new Date().toLocaleString()}`, `> 对话首问：${firstQ}`, ``];
+      for (const m of msgs) {
+        if (m.role === 'user') {
+          lines.push(`## 🙋 ${m.question || ''}`, ``);
+        } else {
+          const tag = m.fallback ? '（模型兜底·非知识库依据）'
+            : m.webAnswer ? '（联网搜索·非知识库依据）'
+            : m.direct ? '（原文直达）'
+            : m.aborted ? '（已中断）' : '';
+          lines.push(`### 🤖 回答${tag}`, ``);
+          if (m.text) lines.push(m.text);
+          if (m.modelNote) lines.push(``, `> 补充说明：${m.modelNote}`);
+          if (m.hits?.length) {
+            lines.push(``, `**引用依据：**`, ``);
+            m.hits.forEach((h, i) => {
+              lines.push(`${i + 1}. ${h.docName}${h.section ? ' › ' + h.section : ''}｜第 ${h.startLine}-${h.endLine} 行`);
+            });
+          }
+          if (m.webHits?.length) {
+            lines.push(``, `**联网来源：**`, ``);
+            m.webHits.forEach((h, i) => lines.push(`${i + 1}. [${h.title}](${h.url})`));
+          }
+          if (m.factIssues?.length) lines.push(``, `> ⚠️ 事实核对警告：${m.factIssues.join(', ')}`);
+        }
+        lines.push(``);
+      }
+      content = lines.join('\n');
+      mime = 'text/markdown';
+      ext = 'md';
+    }
+    const blob = new Blob([content], { type: `${mime};charset=utf-8` });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `kqa-${safeName}-${ts}.${ext}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   },
 
   stop: () => {

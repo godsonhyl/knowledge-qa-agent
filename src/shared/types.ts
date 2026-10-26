@@ -28,6 +28,8 @@ export interface DocMeta {
   addedAt: number;
   chunkCount: number;
   distilled: number;     // 已蒸馏块数
+  /** Confluence 远端已删除/失效（sync 探到 404 时标记） */
+  confluenceStale?: boolean;
 }
 
 /** 文档详情（原文查看器用，含全文） */

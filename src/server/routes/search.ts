@@ -103,6 +103,6 @@ searchRoute.post('/search', async (c) => {
     rerankMs: hybridTrace?.rerankMs,
   };
 
-  recordSearch(r.searchMs, r.hasEvidence, r.reason, r.trace?.channel);
+  recordSearch(r.searchMs, r.hasEvidence, r.reason, r.trace?.channel, question);
   return c.json(r);
 });

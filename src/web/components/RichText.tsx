@@ -148,7 +148,19 @@ export function RichText({ text, hitCount, onCite, streaming }: {
   streaming?: boolean;
 }): ReactNode {
   const hoverNo = useCiteStore((s) => s.hoverNo);
-  const lines = text.split('\n');
+  // 流式期间按 120ms debounce 重渲染，让 [n] 角标边流边可点（不必等整段流完）。
+  // 完成后（streaming=false）直接用最新 text 渲染，不防抖。
+  const [debouncedText, setDebouncedText] = useState(text);
+  const tRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!streaming) { setDebouncedText(text); return; }
+    if (tRef.current) clearTimeout(tRef.current);
+    tRef.current = setTimeout(() => setDebouncedText(text), 120);
+    return () => { if (tRef.current) clearTimeout(tRef.current); };
+  }, [text, streaming]);
+  const renderText = streaming ? debouncedText : text;
+
+  const lines = renderText.split('\n');
   const out: ReactNode[] = [];
   let i = 0;
   let key = 0;
@@ -279,3 +291,5 @@ export function RichText({ text, hitCount, onCite, streaming }: {
     </div>
   );
 }
+
+void useEffect;

@@ -30,6 +30,8 @@ export interface DocPayload {
   confluenceVersion?: number | null;
   /** 最后同步时间（ms） */
   syncedAt?: number | null;
+  /** Confluence 远端已删除/失效（sync-confluence 探到 404 时标记；不直接删，让用户决定） */
+  confluenceStale?: boolean;
 }
 
 export interface ChunkPayload {
@@ -185,7 +187,7 @@ export async function restoreFromBackup(entries: { name: string; text: string; s
 /** 文档列表（payload 投影排除 text） */
 export async function listDocs(): Promise<DocMeta[]> {
   const docs = await scrollAll<DocPayload>(
-    COLLECTION_DOCS, null, ['kind', 'name', 'source', 'size', 'addedAt', 'confluencePageId', 'confluenceVersion', 'syncedAt'],
+    COLLECTION_DOCS, null, ['kind', 'name', 'source', 'size', 'addedAt', 'confluencePageId', 'confluenceVersion', 'syncedAt', 'confluenceStale'],
   );
   const metas: DocMeta[] = [];
   for (const d of docs) {
@@ -199,6 +201,7 @@ export async function listDocs(): Promise<DocMeta[]> {
       addedAt: d.payload.addedAt,
       chunkCount: all.length,
       distilled,
+      confluenceStale: d.payload.confluenceStale === true ? true : undefined,
     });
   }
   metas.sort((a, b) => a.addedAt - b.addedAt);

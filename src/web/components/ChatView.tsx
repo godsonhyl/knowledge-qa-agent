@@ -67,6 +67,7 @@ export function ChatView() {
   const retrievalOnly = useConfigStore((s) => s.retrievalOnly);
   const setRetrievalOnly = useConfigStore((s) => s.setRetrievalOnly);
   const newChat = useChatStore((s) => s.newChat);
+  const exportConversation = useChatStore((s) => s.exportConversation);
   const docsCount = useKbStore((s) => s.docs.length);
 
   const [input, setInput] = useState('');
@@ -103,6 +104,17 @@ export function ChatView() {
             <span className="switch-text">仅检索模式</span>
           </label>
           <Button variant="outline" size="small" onClick={newChat}>新对话</Button>
+          {messages.length > 0 && (
+            <Button
+              variant="outline"
+              size="small"
+              onClick={() => {
+                const fmt = confirm('确定 = 导出 Markdown（可读），取消 = 导出 JSON（结构化备份）') ? 'md' : 'json';
+                exportConversation(fmt);
+              }}
+              title="导出当前对话（Markdown 可读 / JSON 结构化备份）"
+            >导出</Button>
+          )}
         </div>
       </header>
 

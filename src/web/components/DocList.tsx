@@ -39,9 +39,12 @@ export function DocList() {
         {shown.map((d) => {
           const isDistilling = distill?.docId === d.docId;
           return (
-            <li key={d.docId} className="doc-item">
+            <li key={d.docId} className={`doc-item${d.confluenceStale ? ' doc-stale' : ''}`}>
               <div className="doc-meta">
-                <div className="doc-name" title={d.name}>{d.name}</div>
+                <div className="doc-name" title={d.name}>
+                  {d.confluenceStale && <span className="stale-badge" title="Confluence 远端已删除/无权限，建议重新导入或删除">⚠ 失效</span>}
+                  {d.name}
+                </div>
                 <div className="doc-sub">
                   {d.chunkCount} 片段 · {d.size} 字
                   {d.distilled ? ` · 💡${d.distilled}/${d.chunkCount}` : ''}

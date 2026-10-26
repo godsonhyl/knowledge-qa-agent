@@ -405,9 +405,10 @@ kb.get('/distill-status', async (c) => {
 });
 
 /** POST /api/kb/sync-confluence —— Confluence 增量同步
- *  扫描库内所有 source=confluence 且带 confluencePageId 的文档，
- *  逐页抓取最新版本号比对，有变更的 updateDocContent（重切块+重嵌入）。
- *  无 confluencePageId 的老文档（导入时未存版本）跳过——下次重导即带上。 */
+ *  扫描库内所有 source=confluence 且带 confluencePageId 的文档：
+ *  - 远端有新版本 → updateDocContent（重切块+重嵌入）
+ *  - 远端 404/已删除 → 标记 confluenceStale=true（不直接删，让用户决定；DocList 显示"疑似失效"徽章）
+ *  无 confluencePageId 的老文档跳过——下次重导即带上。 */
 kb.post('/sync-confluence', async (c) => {
   if (!confluenceReadyFn()) {
     return c.json({ error: '服务端未配置 Confluence 接入' }, 503 as 400);
@@ -424,6 +425,7 @@ kb.post('/sync-confluence', async (c) => {
     let checked = 0;
     let updated = 0;
     let failed = 0;
+    let stale = 0;
     const details: string[] = [];
     for (const d of docs) {
       const pid = d.payload.confluencePageId;
@@ -444,17 +446,42 @@ kb.post('/sync-confluence', async (c) => {
         kbIndex.removeDocChunks(d.id);
         updated++;
       } catch (err) {
-        failed++;
-        details.push(`${d.payload.name}：${String((err as Error)?.message || err)}`);
+        // 远端 404 = 页面已删除（或权限丢失）：标记失效，不算 failed
+        const msg = String((err as Error)?.message || err);
+        if (/不存在或无权限|404|页面.*不存在/.test(msg)) {
+          await markConfluenceStale(d.id, true);
+          stale++;
+        } else {
+          failed++;
+          details.push(`${d.payload.name}：${msg}`);
+        }
       }
     }
     // 有更新才做一次统一重建（增量移除旧块 + 一次 rebuild 收编新块；
     // 避免每篇都 rebuild 的 O(N×M) 放大）
     if (updated > 0) await kbIndex.run(() => kbIndex.rebuild());
-    return c.json({ checked, updated, failed, details: details.slice(0, 5) });
+    const u = (c as any).get('ssoUser') as any | undefined;
+    audit(u?.sub || '', u?.username || '', 'sync_confluence', `checked=${checked} updated=${updated} stale=${stale} failed=${failed}`, c.req.header('x-forwarded-for') || '');
+    return c.json({ checked, updated, stale, failed, details: details.slice(0, 5) });
   } catch (err) {
     return c.json({ error: String((err as Error)?.message || err) }, 500);
   }
+});
+
+/** 标记/取消标记 Confluence 文档失效（confluenceStale payload 字段） */
+async function markConfluenceStale(docId: string, stale: boolean): Promise<void> {
+  await fetch(`${ENV.QDRANT_URL}/collections/${COLLECTION_DOCS}/points/payload?wait=true`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ payload: { confluenceStale: stale }, points: [docId] }),
+  }).catch(() => undefined);
+}
+
+/** POST /api/kb/docs/:docId/refresh-stale —— 取消失效标记（用户确认重导后调用） */
+kb.post('/docs/:docId/refresh-stale', async (c) => {
+  if (!adminGate(c)) return adminError(c);
+  await markConfluenceStale(c.req.param('docId'), false);
+  return c.json({ ok: true });
 });
 
 /** GET /api/kb/groups —— 知识库分组列表（按 docName 前缀 + bySource 派生）
