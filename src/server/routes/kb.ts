@@ -25,6 +25,7 @@ import { writeKbBackup, listKbBackups, readKbBackup, pruneKbBackups } from '../b
 import { startDistillJob, stopDistillJob, distillJob } from '../distillJob.js';
 import { extractPdfText, PdfNoTextError } from '../pdf.js';
 import { extractDocxText, extractXlsxText, extractPptxText, NoTextError } from '../docParse.js';
+import { audit } from '../audit.js';
 import type { DocSource } from '@shared/types.js';
 
 export const kb = new Hono();
@@ -90,6 +91,8 @@ kb.post('/docs', async (c) => {
         startChar: c.startChar, endChar: c.endChar, source, index: i,
       })));
     }
+    const u1 = (c as any).get('ssoUser') as any | undefined;
+    audit(u1?.sub || '', u1?.username || '', 'doc_import', `name=${body.name} chunks=${(r as any).chunkCount || '?'}`, c.req.header('x-forwarded-for') || '');
     return c.json(r, 201);
   } catch (err) {
     return jsonError(c, err);
@@ -212,6 +215,8 @@ kb.post('/docs/upload', async (c) => {
         startChar: c.startChar, endChar: c.endChar, source, index: i,
       })));
     }
+    const u2 = (c as any).get('ssoUser') as any | undefined;
+    audit(u2?.sub || '', u2?.username || '', 'doc_import', `upload=${savedName} chunks=${(r as any).chunkCount || '?'}`, c.req.header('x-forwarded-for') || '');
     return c.json(r, 201);
   } catch (err) {
     return jsonError(c, err);
@@ -262,6 +267,8 @@ kb.delete('/docs/:docId', async (c) => {
   if (!ok) return c.json({ error: '文档不存在' }, 404);
   // 增量更新索引（不整库重建）
   kbIndex.removeDocChunks(c.req.param('docId'));
+  const u = (c as any).get('ssoUser') as any | undefined;
+  audit(u?.sub || '', u?.username || '', 'doc_delete', `docId=${c.req.param('docId')}`, c.req.header('x-forwarded-for') || '');
   return c.json({ ok: true });
 });
 
@@ -292,6 +299,8 @@ kb.delete('/docs', async (c) => {
 
   await clearAll();
   await kbIndex.run(() => kbIndex.rebuild());
+  const u = (c as any).get('ssoUser') as any | undefined;
+  audit(u?.sub || '', u?.username || '', 'clear_all', `backup=${backup || 'none'}`, c.req.header('x-forwarded-for') || '');
   return c.json({ ok: true, backup: backup || undefined, backupError });
 });
 

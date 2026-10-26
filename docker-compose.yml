@@ -52,6 +52,10 @@ services:
       OIDC_REQUIRED: "${OIDC_REQUIRED:-0}"
       # 本地账号模式（与 OIDC_* 互不依赖；配了即启用注册/密码登录）
       OIDC_JWT_SECRET: "${OIDC_JWT_SECRET:-}"
+      # ---- 用户配额/限流（可选，OIDC_REQUIRED=1 时生效）----
+      RATE_LIMIT_PER_HOUR: "${RATE_LIMIT_PER_HOUR:-0}"
+      RATE_LIMIT_BURST: "${RATE_LIMIT_BURST:-0}"
+      AUDIT_LOG_ENABLED: "${AUDIT_LOG_ENABLED:-0}"
       BACKUP_DIR: "/app/backups"
       BACKUP_INTERVAL_MS: "${BACKUP_INTERVAL_MS:-86400000}"
       # ---- 可选：自签 HTTPS（解锁浏览器安全上下文）----

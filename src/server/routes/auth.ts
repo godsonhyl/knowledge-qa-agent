@@ -15,6 +15,7 @@ import {
   hashPassword, verifyPassword, isValidEmail, signLocalJwt, verifyLocalJwt, isLocalJwt,
   type UserPayload,
 } from '../users.js';
+import { audit } from '../audit.js';
 
 export const authRoute = new Hono();
 
@@ -64,6 +65,7 @@ authRoute.post('/register', async (c) => {
   const frontUser = toFrontUser(payload);
   const token = signLocalJwt({ type: 'access', sub: payload.email, email: payload.email, name: payload.name, username: payload.username, roles: payload.roles, source: 'local' });
   const refreshToken = signLocalJwt({ type: 'refresh', sub: payload.email, email: payload.email, name: payload.name, username: payload.username, roles: payload.roles, source: 'local' });
+  audit(payload.email, payload.username, 'register', `email=${email}`, c.req.header('x-forwarded-for') || '');
   return c.json({ success: true, token, refreshToken, user: frontUser }, 201);
 });
 
@@ -88,6 +90,7 @@ authRoute.post('/login', async (c) => {
   const frontUser = toFrontUser(found.payload);
   const token = signLocalJwt({ type: 'access', sub: found.payload.email, email: found.payload.email, name: found.payload.name, username: found.payload.username, roles: found.payload.roles, source: 'local' });
   const refreshToken = signLocalJwt({ type: 'refresh', sub: found.payload.email, email: found.payload.email, name: found.payload.name, username: found.payload.username, roles: found.payload.roles, source: 'local' });
+  audit(found.payload.email, found.payload.username, 'login', `email=${email}`, c.req.header('x-forwarded-for') || '');
   return c.json({ success: true, token, refreshToken, user: frontUser });
 });
 

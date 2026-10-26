@@ -94,6 +94,15 @@ docker compose
 
 ## 变更记录
 
+## v2.7（2026-10）
+
+**第三批优化：用户配额限流 + 审计日志（多人使用前的治理准备）**
+- 用户配额限流：`RATE_LIMIT_PER_HOUR`（每用户每小时问答上限）+ `RATE_LIMIT_BURST`（并发数上限），超限返回 429 + 重试时间；进程内存级滑动窗口计数，OIDC_REQUIRED=1 时生效，默认 0=不限
+- 审计日志：`AUDIT_LOG_ENABLED=1` 时记录用户操作（提问/搜索/导入/删除/清空/登录/注册）到 Qdrant `kqa_audit` collection；异步写不阻塞主路径；含用户/操作/详情/IP
+- 新增 `src/server/rateLimit.ts` + `src/server/audit.ts`；`rateLimitMiddleware` 挂在 chat/search/web-search 三个"消耗型"端点
+- 新增 `tests/rateLimit.test.ts`（2 用例），总 80 vitest 全绿
+- 透传 `RATE_LIMIT_PER_HOUR/RATE_LIMIT_BURST/AUDIT_LOG_ENABLED` 到 docker-compose / .env.example
+
 ## v2.6（2026-10）
 
 **第二批体验优化：多格式文档 + 表格保形 + 多轮上下文**

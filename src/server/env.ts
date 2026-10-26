@@ -72,6 +72,15 @@ export interface Env {
   /** 本地账号模式 HMAC 密钥（HS256 JWT 签发/校验）。配了才启用本地注册/登录。
    *  与 OIDC_* 互不依赖：可只配此项（纯本地账号）、只配 OIDC_*（纯 SSO）、或都配（双模式）。 */
   OIDC_JWT_SECRET: string;
+
+  /** ---- 用户配额/限流（可选，OIDC_REQUIRED=1 时生效）----
+   *  RATE_LIMIT_PER_HOUR：每用户每小时问答次数上限（默认 0=不限）。
+   *  RATE_LIMIT_BURST：并发请求数上限（默认 0=不限）。
+   *  进程内存级计数（重启归零），不依赖外部存储。 */
+  RATE_LIMIT_PER_HOUR: number;
+  RATE_LIMIT_BURST: number;
+  /** 审计日志：是否记录用户操作（提问/删除/清空等）到 kqa_audit collection。默认 0=关 */
+  AUDIT_LOG_ENABLED: boolean;
 }
 
 export const ENV: Env = {
@@ -116,6 +125,10 @@ export const ENV: Env = {
   OIDC_SCOPE: process.env.OIDC_SCOPE || 'openid profile email',
   OIDC_REQUIRED: bool(process.env.OIDC_REQUIRED, false),
   OIDC_JWT_SECRET: process.env.OIDC_JWT_SECRET || '',
+
+  RATE_LIMIT_PER_HOUR: int(process.env.RATE_LIMIT_PER_HOUR, 0),
+  RATE_LIMIT_BURST: int(process.env.RATE_BURST || process.env.RATE_LIMIT_BURST, 0),
+  AUDIT_LOG_ENABLED: bool(process.env.AUDIT_LOG_ENABLED, false),
 };
 
 export function llmReady(): boolean {

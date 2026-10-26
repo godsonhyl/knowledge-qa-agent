@@ -19,6 +19,8 @@ import { metricsRoute } from './routes/metrics.js';
 import { authRoute } from './routes/auth.js';
 import { verifyAccessToken } from './oidc.js';
 import { verifyLocalJwt, isLocalJwt } from './users.js';
+import { checkRateLimit, releaseInflight, rateLimitActive } from './rateLimit.js';
+import { audit } from './audit.js';
 import { staticHandler } from './routes/static.js';
 import { certRoute } from './cert.js';
 
@@ -75,7 +77,36 @@ async function authMiddleware(c: Context, next: () => Promise<void>): Promise<vo
   return c.json({ error: '未登录' }, 401);
 }
 
+/** 限流 + 审计中间件：仅对"消耗型"端点（chat/search/web-search）生效。
+ *  只在 OIDC_REQUIRED=1 且配了限流参数时实际限流；审计在 AUDIT_LOG_ENABLED 时记录。 */
+const CONSUMING_PATHS = ['/api/chat', '/api/kb/search', '/api/web-search'];
+async function rateLimitMiddleware(c: Context, next: () => Promise<void>): Promise<void | Response> {
+  const path = new URL(c.req.url).pathname;
+  if (!CONSUMING_PATHS.includes(path)) return next();
+  const u = c.get('ssoUser') as { sub?: string; name?: string; username?: string } | undefined;
+  const userSub = u?.sub || 'anonymous';
+  // 限流（仅在配了上限 + 有用户身份时）
+  if (rateLimitActive() && userSub !== 'anonymous') {
+    const r = checkRateLimit(userSub);
+    if (!r.ok) {
+      return c.json({ error: r.reason, retryAfter: r.retryAfterSec }, 429);
+    }
+  }
+  await next();
+  // 审计（不阻塞响应——next() 已返回了 Response，这里只是记一笔）
+  if (ENV.AUDIT_LOG_ENABLED) {
+    const action = path === '/api/chat' ? 'chat' : path === '/api/kb/search' ? 'search' : 'web_search';
+    // 从已返回的 response body 取摘要不行（已 stream）——记请求参数即可
+    let detail = '';
+    try { const b = await c.req.json().catch(() => null); detail = b?.question || b?.q || ''; } catch { /* ignore */ }
+    audit(userSub, u?.username || u?.name || '', action, detail, c.req.header('x-forwarded-for') || c.req.header('x-real-ip') || '');
+  }
+  // 释放并发计数
+  if (rateLimitActive() && userSub !== 'anonymous') releaseInflight(userSub);
+}
+
 app.use('/api/*', authMiddleware);
+app.use('/api/*', rateLimitMiddleware);
 app.route('/api/config', configRoute);
 app.route('/api/auth', authRoute);
 app.route('/api/chat', chat);

@@ -64,6 +64,11 @@ export async function ensureCollections(): Promise<void> {
   // 用户表 collection（本地账号 + OIDC 首次登录落库）
   const { ensureUsersCollection } = await import('./users.js');
   await ensureUsersCollection();
+  // 审计日志 collection（AUDIT_LOG_ENABLED 时由 audit.ts 懒建；此处预建不阻塞）
+  if (ENV.AUDIT_LOG_ENABLED) {
+    const { COLLECTION_AUDIT } = await import('./audit.js');
+    await ensureCollection(COLLECTION_AUDIT, 1);
+  }
 }
 
 /** 按名字查文档（去重检查用） */

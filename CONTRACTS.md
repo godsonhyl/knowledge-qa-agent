@@ -281,7 +281,7 @@ payload: kind:"doc", name, source, size, addedAt, text
 | `tests/oidc.test.ts` | §13 SSO/OIDC + 本地账号：PKCE challenge、state 一次性消费、RS256 jwt（iss/aud/exp）校验、签名篡改；scrypt 密码往返/salt 唯一、HS256 签发/校验/过期/篡改 |
 | `scripts/e2e.mjs` | 对运行中的 stack：种子导入 + §4/§5 + 引用偏移往返 + chat SSE 透传 |
 
-**合入门槛**：任何检索层改动前先跑 `npm test`（77 全绿）；UI 改动后跑 `npm run typecheck` + `build`。
+**合入门槛**：任何检索层改动前先跑 `npm test`（80 全绿）；UI 改动后跑 `npm run typecheck` + `build`。
 
 ---
 
