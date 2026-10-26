@@ -6,6 +6,7 @@ import { embed } from '../embeddings.js';
 import { searchPoints, buildGroupFilter } from '../qdrant.js';
 import { COLLECTION_CHUNKS } from '../kbStore.js';
 import { rerankHits } from '../rerank.js';
+import { generateHypothesis } from '../hyde.js';
 import type { Retriever, LexHit, LexResult } from './retriever.js';
 import type { Hit, SearchResult } from '@shared/types.js';
 
@@ -22,8 +23,8 @@ export interface HybridHit extends Hit {}
 export async function hybridSearch(
   question: string,
   retriever: Retriever,
-  opts: { topK?: number; sensitivity?: number; variants?: string[]; docNamePrefix?: string | null; source?: string | null },
-): Promise<SearchResult & { _trace: { lexHitCount: number; vecHitCount: number; rerankedCount: number; gate: { lex: boolean; vec: boolean }; rerankMs: number } }> {
+  opts: { topK?: number; sensitivity?: number; variants?: string[]; docNamePrefix?: string | null; source?: string | null; hyde?: string | null },
+): Promise<SearchResult & { _trace: { lexHitCount: number; vecHitCount: number; rerankedCount: number; gate: { lex: boolean; vec: boolean }; rerankMs: number; hydeUsed?: boolean } }> {
   const topK = opts.topK || 8;
   const sensitivity = typeof opts.sensitivity === 'number' ? opts.sensitivity : 50;
   const variants = (opts.variants && opts.variants.length > 0) ? opts.variants : [question];
@@ -40,12 +41,16 @@ export async function hybridSearch(
   const lex = lexPerVariant[0]!;
 
   // ---- 向量通道（带分组过滤时也按 filter 收窄）----
+  // HyDE（A2）：若上层已生成假设文档，用假设文档嵌入（措辞更接近文档，召回词面差异大
+  // 但语义近的 chunk）；未启用/失败 → 沿用原问题嵌入（主路径不变，不破坏 §4/§5）。
   let vecHits: { chunkId: string; sim: number; payload: any }[] = [];
   let topSim = 0;
+  let hydeUsed = false;
   if (embedReady() && ENV.EMBED_VECTOR_GATE) {
     try {
-      // 对原问题做向量检索（变体不重复嵌入，避免成本翻倍）
-      const [vec] = await embed([question]);
+      const queryForVec = opts.hyde || question;
+      const [vec] = await embed([queryForVec]);
+      if (opts.hyde) hydeUsed = true;
       // 构造 Qdrant filter：按 docNamePrefix / source 收窄（知识库分组）
       const filter = buildGroupFilter(opts.docNamePrefix, opts.source);
       const results = await searchPoints(COLLECTION_CHUNKS, vec!, Math.max(topK * 3, 16), filter);
@@ -199,6 +204,7 @@ export async function hybridSearch(
       rerankedCount: kept.length,
       gate: { lex: lexGate, vec: vecGate },
       rerankMs: rerankMs,
+      hydeUsed,
     },
   });
 }

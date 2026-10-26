@@ -6,6 +6,7 @@ import { kbIndex } from '../kbIndex.js';
 import { hybridSearch } from '../search/hybrid.js';
 import { rewriteQuery, type HistoryTurn } from '../queryRewrite.js';
 import { classifyQuestion, mergeHits } from '../multiStep.js';
+import { generateHypothesis } from '../hyde.js';
 import { recordSearch } from './metrics.js';
 import type { SearchResult, SearchTrace } from '@shared/types.js';
 
@@ -32,7 +33,10 @@ searchRoute.post('/search', async (c) => {
   // 查询改写：LLM 把问题扩展为多个同义/术语规范化变体；多路检索后用 RRF 二次融合。
   // 失败/超时静默降级为原问题单路检索（不影响主路径可用性）。
   const rewriteStart = Date.now();
-  const variants = await rewriteQuery(question, { sensitivity, history }).catch(() => [question]);
+  const [variants, hydeText] = await Promise.all([
+    rewriteQuery(question, { sensitivity, history }).catch(() => [question]),
+    generateHypothesis(question),   // HyDE 与改写并行（不串行加延迟）
+  ]);
   const rewriteMs = Date.now() - rewriteStart;
 
   // 复杂问题多步检索：LLM 判定复合问题 → 拆子问题 → 各自 hybridSearch → 合并。
@@ -42,7 +46,7 @@ searchRoute.post('/search', async (c) => {
   const classifyMs = Date.now() - classifyStart;
 
   let r: SearchResult;
-  let hybridTrace: { lexHitCount: number; vecHitCount: number; rerankedCount: number; gate: { lex: boolean; vec: boolean }; rerankMs: number } | null = null;
+  let hybridTrace: { lexHitCount: number; vecHitCount: number; rerankedCount: number; gate: { lex: boolean; vec: boolean }; rerankMs: number; hydeUsed?: boolean } | null = null;
   if (classification.complex && classification.subQuestions.length >= 2) {
     // 子问题各自检索（带同样的分组过滤 + 改写），合并去重
     const subResults: SearchResult[] = [];
@@ -55,7 +59,7 @@ searchRoute.post('/search', async (c) => {
     }
     // 合并：把原问题的检索结果也并入（兜底），保证不漏
     const primary = await kbIndex.run(() => hybridSearch(question, kbIndex.retriever, {
-      topK, sensitivity, variants, docNamePrefix, source,
+      topK, sensitivity, variants, docNamePrefix, source, hyde: hydeText,
     }));
     hybridTrace = (primary as any)._trace;
     subResults.push(primary);
@@ -79,7 +83,7 @@ searchRoute.post('/search', async (c) => {
     r.searchMs = Date.now() - started;
   } else {
     const hr = await kbIndex.run(() => hybridSearch(question, kbIndex.retriever, {
-      topK, sensitivity, variants, docNamePrefix, source,
+      topK, sensitivity, variants, docNamePrefix, source, hyde: hydeText,
     }));
     hybridTrace = (hr as any)._trace;
     r = hr;
@@ -103,6 +107,6 @@ searchRoute.post('/search', async (c) => {
     rerankMs: hybridTrace?.rerankMs,
   };
 
-  recordSearch(r.searchMs, r.hasEvidence, r.reason, r.trace?.channel, question);
+  recordSearch(r.searchMs, r.hasEvidence, r.reason, r.trace?.channel, question, r.hits.map((h) => h.chunkId));
   return c.json(r);
 });

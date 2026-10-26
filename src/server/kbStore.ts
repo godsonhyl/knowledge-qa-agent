@@ -2,6 +2,7 @@
    server/kbStore.ts —— 知识库读写层（Qdrant 之上的领域操作）
    ============================================================ */
 import { ENV, embedReady } from './env.js';
+import { createHash } from 'node:crypto';
 import { uuidv4, chunkIdFor } from './ids.js';
 import { chunkDocument } from './chunker.js';
 import { embed, embedInputFor, invalidateEmbedCache } from './embeddings.js';
@@ -32,6 +33,8 @@ export interface DocPayload {
   syncedAt?: number | null;
   /** Confluence 远端已删除/失效（sync-confluence 探到 404 时标记；不直接删，让用户决定） */
   confluenceStale?: boolean;
+  /** 全文 sha256（C3 重复内容检测：不同名同内容时提示用户） */
+  contentHash?: string;
 }
 
 export interface ChunkPayload {
@@ -80,7 +83,9 @@ export async function findDocByName(name: string): Promise<{ id: string; payload
 }
 
 /** 导入一篇文档：切块 → 嵌入 → 双 collection upsert。重名返回 dup error。
- *  opts.confluencePageId / confluenceVersion：Confluence 文档的增量同步元数据（非 Confluence 不传）。 */
+ *  opts.confluencePageId / confluenceVersion：Confluence 文档的增量同步元数据（非 Confluence 不传）。
+ *  重复内容检测（C3）：计算全文 sha256，若库内已有同 hash 且不同名的文档，payload 记 contentHash
+ *  供 /api/kb/docs 响应透出（前端提示"与《X》内容相同"）；同 hash 同名仍走重名 409。 */
 export async function addDoc(
   name: string, text: string, source: DocSource,
   opts: { confluencePageId?: string; confluenceVersion?: number } = {},
@@ -91,6 +96,9 @@ export async function addDoc(
 
   const dup = await findDocByName(name);
   if (dup) throw new KbError(409, `文档已存在：${name}`);
+
+  // C3 重复内容检测：同 hash（不同名）静默共存但带 contentHash 标记
+  const contentHash = createHash('sha256').update(trimmed).digest('hex');
 
   const raw = chunkDocument(trimmed, name);
   if (!raw.length) throw new KbError(400, '解析后没有可用的内容片段');
@@ -127,6 +135,7 @@ export async function addDoc(
     vector: [0],
     payload: {
       kind: 'doc', name, source, size: trimmed.length, addedAt, text: trimmed,
+      contentHash,
       confluencePageId: opts.confluencePageId ?? null,
       confluenceVersion: opts.confluenceVersion ?? null,
       syncedAt: Date.now(),
@@ -187,7 +196,7 @@ export async function restoreFromBackup(entries: { name: string; text: string; s
 /** 文档列表（payload 投影排除 text） */
 export async function listDocs(): Promise<DocMeta[]> {
   const docs = await scrollAll<DocPayload>(
-    COLLECTION_DOCS, null, ['kind', 'name', 'source', 'size', 'addedAt', 'confluencePageId', 'confluenceVersion', 'syncedAt', 'confluenceStale'],
+    COLLECTION_DOCS, null, ['kind', 'name', 'source', 'size', 'addedAt', 'confluencePageId', 'confluenceVersion', 'syncedAt', 'confluenceStale', 'contentHash'],
   );
   const metas: DocMeta[] = [];
   for (const d of docs) {
@@ -202,6 +211,10 @@ export async function listDocs(): Promise<DocMeta[]> {
       chunkCount: all.length,
       distilled,
       confluenceStale: d.payload.confluenceStale === true ? true : undefined,
+      contentHash: d.payload.contentHash || undefined,
+      duplicateOf: d.payload.contentHash
+        ? docs.find((x) => x.id !== d.id && x.payload.contentHash === d.payload.contentHash)?.payload.name
+        : undefined,
     });
   }
   metas.sort((a, b) => a.addedAt - b.addedAt);

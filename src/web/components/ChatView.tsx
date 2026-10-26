@@ -629,6 +629,7 @@ function SearchTraceView({ trace, hits }: { trace: NonNullable<SearchResult['tra
   if (trace.rewriteMs !== undefined) rows.push(['改写耗时', `${trace.rewriteMs}ms`]);
   if (trace.classifyMs !== undefined) rows.push(['分类耗时', `${trace.classifyMs}ms`]);
   if (trace.rerankMs !== undefined) rows.push(['rerank 耗时', `${trace.rerankMs}ms`]);
+  if (trace.hydeUsed) rows.push(['HyDE', '已启用（假设文档嵌入）']);
   return (
     <div className="trace-panel">
       <table className="trace-table">

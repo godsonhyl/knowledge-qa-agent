@@ -59,6 +59,8 @@ services:
       # ---- 告警 webhook（可选）：/api/health 不健康时 POST 通知 ----
       ALERT_WEBHOOK_URL: "${ALERT_WEBHOOK_URL:-}"
       ALERT_DEBOUNCE_SEC: "${ALERT_DEBOUNCE_SEC:-300}"
+      # ---- HyDE 假设文档嵌入（可选）：提升向量召回，不改阈值 ----
+      HYDE_ENABLED: "${HYDE_ENABLED:-0}"
       BACKUP_DIR: "/app/backups"
       BACKUP_INTERVAL_MS: "${BACKUP_INTERVAL_MS:-86400000}"
       # ---- 可选：自签 HTTPS（解锁浏览器安全上下文）----

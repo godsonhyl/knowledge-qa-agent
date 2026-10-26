@@ -43,6 +43,7 @@ export function DocList() {
               <div className="doc-meta">
                 <div className="doc-name" title={d.name}>
                   {d.confluenceStale && <span className="stale-badge" title="Confluence 远端已删除/无权限，建议重新导入或删除">⚠ 失效</span>}
+                  {d.duplicateOf && <span className="dup-badge" title={`与《${d.duplicateOf}》内容相同（sha256 一致），可能是重复导入`}>⧉ 重复</span>}
                   {d.name}
                 </div>
                 <div className="doc-sub">

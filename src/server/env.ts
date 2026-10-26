@@ -85,6 +85,10 @@ export interface Env {
    *  ALERT_DEBOUNCE_SEC 防同一故障刷屏（默认 300s）。 */
   ALERT_WEBHOOK_URL: string;
   ALERT_DEBOUNCE_SEC: number;
+  /** HyDE 假设文档嵌入（可选，A2）：向量检索前让 LLM 生成假设答案用于嵌入，
+   *  召回词面差异大但语义近的 chunk。默认 0=关（多一次 LLM 调用有成本）。
+   *  §4/§5 回归不受影响——只扩向量召回，不改证据门阈值。 */
+  HYDE_ENABLED: boolean;
 }
 
 export const ENV: Env = {
@@ -135,6 +139,7 @@ export const ENV: Env = {
   AUDIT_LOG_ENABLED: bool(process.env.AUDIT_LOG_ENABLED, false),
   ALERT_WEBHOOK_URL: (process.env.ALERT_WEBHOOK_URL || '').replace(/\/+$/, ''),
   ALERT_DEBOUNCE_SEC: int(process.env.ALERT_DEBOUNCE_SEC, 300),
+  HYDE_ENABLED: bool(process.env.HYDE_ENABLED, false),
 };
 
 export function llmReady(): boolean {

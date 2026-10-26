@@ -28,6 +28,12 @@ export interface Metrics {
     channelCounts: Record<string, number>;
     /** 慢查询（>3000ms）样本，最近 N 条，含问题原文供诊断 */
     slowQueries: { ms: number; question: string; reason: string; hasEvidence: boolean; ts: number }[];
+    /** C2 孤儿 chunk 检测：命中分布（top 命中 + 0 命中计数） */
+    chunkCoverage: {
+      distinctHitChunks: number;
+      zeroHitChunks: number;
+      topHitChunks: { chunkId: string; hits: number }[];
+    };
   };
 }
 
@@ -38,8 +44,11 @@ export const httpStats = {
   refusals: 0,
   reasonCounts: {} as Record<string, number>,
   channelCounts: {} as Record<string, number>,
-  /** 每次检索的耗时样本（用于 P95/慢查询；保留最近 N 条，进程内存级） */
-  latencySamples: [] as { ms: number; question: string; reason: string; hasEvidence: boolean; ts: number }[],
+  /** 每次检索的耗时样本（用于 P95/慢查询；保留最近 N 条，进程内存级）。
+   *  chunkHits：本次命中的 chunkId 列表（用于孤儿 chunk 检测 C2——长期 0 命中的 chunk）。 */
+  latencySamples: [] as { ms: number; question: string; reason: string; hasEvidence: boolean; ts: number; chunkIds?: string[] }[],
+  /** chunk 命中计数（C2 孤儿检测）：chunkId → 累计命中次数。进程内存级，重启归零。 */
+  chunkHitCounts: new Map<string, number>(),
 };
 
 /** 慢查询样本保留上限（进程内存级；超过则裁最旧的） */
@@ -48,8 +57,9 @@ const LATENCY_SAMPLE_MAX = 200;
 const SLOW_THRESHOLD_MS = 3000;
 
 /** 记录一次检索。reason 可选（用于拒答原因聚合）；channel 可选（行情直查 vs 知识库）。
- *  question 可选（用于慢查询诊断：定位是哪个问题慢）。 */
-export function recordSearch(searchMs: number, hasEvidence: boolean, reason?: string, channel?: string, question?: string): void {
+ *  question 可选（用于慢查询诊断：定位是哪个问题慢）。
+ *  chunkIds 可选（用于孤儿 chunk 检测 C2：累计每块被命中次数）。 */
+export function recordSearch(searchMs: number, hasEvidence: boolean, reason?: string, channel?: string, question?: string, chunkIds?: string[]): void {
   httpStats.total++;
   httpStats.searchCount++;
   httpStats.searchMsSum += searchMs;
@@ -64,7 +74,14 @@ export function recordSearch(searchMs: number, hasEvidence: boolean, reason?: st
     reason: reason || '',
     hasEvidence,
     ts: Date.now(),
+    chunkIds: chunkIds?.slice(0, 20),
   });
+  // C2 孤儿 chunk 检测：累计每块被命中次数
+  if (chunkIds?.length) {
+    for (const id of chunkIds) {
+      httpStats.chunkHitCounts.set(id, (httpStats.chunkHitCounts.get(id) || 0) + 1);
+    }
+  }
 }
 
 /** 计算 P95 检索耗时（基于 latencySamples） */
@@ -115,6 +132,16 @@ metricsRoute.get('/', async (c) => {
         .filter((s) => s.ms >= SLOW_THRESHOLD_MS)
         .slice(-20)
         .reverse(),
+      /** C2 孤儿 chunk 检测：被命中的 chunk 数 + 长期 0 命中（不在 chunkHitCounts 里）的 chunk 数 */
+      chunkCoverage: {
+        distinctHitChunks: httpStats.chunkHitCounts.size,
+        // 0 命中数 = 总 chunk 数 - 命中过的（粗略，kbIndex.chunkCount 是当前索引规模）
+        zeroHitChunks: Math.max(0, kbIndex.chunkCount - httpStats.chunkHitCounts.size),
+        topHitChunks: [...httpStats.chunkHitCounts.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 10)
+          .map(([id, n]) => ({ chunkId: id, hits: n })),
+      },
     },
   };
   return c.json(m);

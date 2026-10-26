@@ -30,6 +30,10 @@ export interface DocMeta {
   distilled: number;     // 已蒸馏块数
   /** Confluence 远端已删除/失效（sync 探到 404 时标记） */
   confluenceStale?: boolean;
+  /** 全文 sha256（服务端内部用，前端可忽略） */
+  contentHash?: string;
+  /** C3 重复内容检测：库内是否有不同名但同内容（sha256 相同）的文档 */
+  duplicateOf?: string;
 }
 
 /** 文档详情（原文查看器用，含全文） */
@@ -101,6 +105,8 @@ export interface SearchTrace {
   classifyMs?: number;
   /** rerank 耗时（ms） */
   rerankMs?: number;
+  /** HyDE 是否启用（假设文档嵌入用于向量检索） */
+  hydeUsed?: boolean;
 }
 
 /** POST /api/kb/search 的完整返回 */
