@@ -10,7 +10,7 @@ import { authHeaders } from '../stores/auth.js';
 import { REASON_TEXT } from '../qaPrompt.js';
 import { EvidenceCard } from './EvidenceCard.js';
 import { RichText } from './RichText.js';
-import type { ConfigResp, SearchResult } from '@shared/types.js';
+import type { ConfigResp, SearchResult, Hit } from '@shared/types.js';
 
 export function ChatView() {
   const messages = useChatStore((s) => s.messages);
@@ -323,16 +323,24 @@ function WebSources({ msg }: { msg: ChatMessage }) {
 
 function EvidenceList({ msg }: { msg: ChatMessage }) {
   const [collapsed, setCollapsed] = useState(false);
+  const [expandAll, setExpandAll] = useState(false);
   return (
     <div className="ev-wrap">
       <div className="evidence-head">
         <span>引用依据 · {msg.hits?.length || 0} 条</span>
-        <button className="collapse-btn" onClick={() => setCollapsed((c) => !c)}>
-          {collapsed ? '展开' : '收起'}
-        </button>
+        <div className="ev-head-btns">
+          {msg.hits && msg.hits.length > 1 && !collapsed && (
+            <button className="collapse-btn" onClick={() => setExpandAll((v) => !v)}>
+              {expandAll ? '全部收起' : '全部展开'}
+            </button>
+          )}
+          <button className="collapse-btn" onClick={() => setCollapsed((c) => !c)}>
+            {collapsed ? '展开' : '收起'}
+          </button>
+        </div>
       </div>
       {!collapsed && msg.hits!.map((h, i) => (
-        <EvidenceCard key={h.chunkId} no={i + 1} hit={h} defaultOpen={i === 0} />
+        <EvidenceCard key={h.chunkId} no={i + 1} hit={h} defaultOpen={expandAll || i === 0} />
       ))}
     </div>
   );
@@ -420,13 +428,14 @@ function AnswerActions({ msg }: { msg: ChatMessage }) {
           onClick={() => setShowTrace((v) => !v)}
         >{showTrace ? '🔧 收起' : '🔧 追踪'}</button>
       )}
-      {showTrace && msg.search?.trace && <SearchTraceView trace={msg.search.trace} />}
+      {showTrace && msg.search?.trace && <SearchTraceView trace={msg.search.trace} hits={msg.hits} />}
     </div>
   );
 }
 
-/** 检索链路追踪面板（🔧 展开）：改写变体 / 各路命中 / 证据门 / 耗时 / 拒答原因 */
-function SearchTraceView({ trace }: { trace: NonNullable<SearchResult['trace']> }) {
+/** 检索链路追踪面板（🔧 展开）：改写变体 / 各路命中 / 证据门 / 耗时 / 拒答原因 / 命中 chunk 明细 */
+function SearchTraceView({ trace, hits }: { trace: NonNullable<SearchResult['trace']>; hits?: Hit[] }) {
+  const [showChunks, setShowChunks] = useState(false);
   const rows: [string, string][] = [
     ['通道', trace.channel || 'kb'],
     ['证据门', `词法:${trace.gate.lex ? '✓' : '✗'}  向量:${trace.gate.vec ? '✓' : '✗'}`],
@@ -460,6 +469,31 @@ function SearchTraceView({ trace }: { trace: NonNullable<SearchResult['trace']> 
           <span className="trace-k">子问题：</span>
           {trace.classification.subQuestions.map((v, i) => <code key={i}>{v}</code>)}
         </div>
+      )}
+      {hits && hits.length > 0 && (
+        <>
+          <button className="trace-chunks-btn" onClick={() => setShowChunks((v) => !v)}>
+            {showChunks ? '收起命中明细' : `命中 chunk 明细（${hits.length}）`}
+          </button>
+          {showChunks && (
+            <div className="trace-chunks">
+              {hits.map((h, i) => (
+                <div key={h.chunkId} className="trace-chunk">
+                  <span className="trace-chunk-no">#{i + 1}</span>
+                  <span className="trace-chunk-loc">{h.docName} › {h.section} · L{h.startLine}-{h.endLine}</span>
+                  <span className="trace-chunk-score" title="融合分">fused={h.fused}</span>
+                  <span className="trace-chunk-score" title="归一化相关度">rel={h.rel}</span>
+                  {h.lex && (
+                    <span className="trace-chunk-lex" title="词法匹配">
+                      lex: score={h.lex.score} matched={h.lex.matchedTerms.join(',')}
+                    </span>
+                  )}
+                  {h.sim !== undefined && <span className="trace-chunk-sim" title="向量相似度">sim={h.sim.toFixed(3)}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
     </div>
   );
