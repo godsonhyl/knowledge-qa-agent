@@ -6,7 +6,6 @@ import { kbIndex } from '../kbIndex.js';
 import { hybridSearch } from '../search/hybrid.js';
 import { rewriteQuery, type HistoryTurn } from '../queryRewrite.js';
 import { classifyQuestion, mergeHits } from '../multiStep.js';
-import { isMarketQuery, tryMarketDirect, isFuturesBasisQuery, tryFuturesBasisDirect } from '../marketData.js';
 import { recordSearch } from './metrics.js';
 import type { SearchResult, SearchTrace } from '@shared/types.js';
 
@@ -27,52 +26,8 @@ searchRoute.post('/search', async (c) => {
     : [];
   const started = Date.now();
 
-  // ---- 行情数据直查通道（检索前优先判定；命中则跳过知识库检索）----
-  // 先试期货/基差直查（含"基差/期货/期现"的问题），再试现货直查
-  if (isFuturesBasisQuery(question)) {
-    const fb = await tryFuturesBasisDirect(question).catch(() => null);
-    if (fb) {
-      const r: SearchResult = {
-        hits: [{ chunkId: 'futures', docId: 'futures', docName: '基差直查', section: fb.name,
-          startLine: 0, endLine: 0, startChar: 0, endChar: 0,
-          text: fb.text, summary: null, fused: 100, rel: 1 }],
-        allScored: [], hasEvidence: true, reason: 'market-data',
-        coverage: 1, matchCount: 1, termHits: 1, rarity: 1, phraseHit: 1, topScore: 100,
-        topSim: 0, terms: [], searchMs: Date.now() - started, directAnswer: true,
-        trace: {
-          question, variants: [question], lexHitCount: 0, vecHitCount: 0,
-          rerankedCount: 0, directAnswer: true, gate: { lex: true, vec: false },
-          reason: 'market-data', channel: 'market-data', searchMs: Date.now() - started,
-        },
-      };
-      recordSearch(r.searchMs, true, 'market-data', 'market-data');
-      return c.json(r);
-    }
-    // 基差问题但取数失败 → 继续走知识库/联网兜底
-  }
-  if (isMarketQuery(question)) {
-    const md = await tryMarketDirect(question).catch(() => null);
-    if (md) {
-      const r: SearchResult = {
-        hits: [], allScored: [], hasEvidence: true, reason: 'market-data',
-        coverage: 1, matchCount: 1, termHits: 1, rarity: 1, phraseHit: 1, topScore: 100,
-        topSim: 0, terms: [], searchMs: Date.now() - started,
-        directAnswer: true,
-        trace: {
-          question, variants: [question], lexHitCount: 0, vecHitCount: 0,
-          rerankedCount: 0, directAnswer: true, gate: { lex: true, vec: false },
-          reason: 'market-data', channel: 'market-data', searchMs: Date.now() - started,
-        },
-      };
-      // 行情直查的文本放在 hits[0].text（前端直查分支取 top.text）
-      r.hits = [{ chunkId: 'market', docId: 'market', docName: '行情直查', section: md.name,
-        startLine: 0, endLine: 0, startChar: 0, endChar: 0,
-        text: md.text, summary: null, fused: 100, rel: 1 }];
-      recordSearch(r.searchMs, true, 'market-data', 'market-data');
-      return c.json(r);
-    }
-    // 行情问题但接口失败 → 继续走知识库（可能知识库里有相关文档）
-  }
+  // 检索主链路（v2.8 起统一）：知识库检索 → LLM →（拒答后前端手动）联网兜底。
+  // 行情/基差直查通道已按产品决策移除（不再拦截任何问题，一切先走知识库）。
 
   // 查询改写：LLM 把问题扩展为多个同义/术语规范化变体；多路检索后用 RRF 二次融合。
   // 失败/超时静默降级为原问题单路检索（不影响主路径可用性）。

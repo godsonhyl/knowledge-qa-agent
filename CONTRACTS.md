@@ -238,7 +238,7 @@ payload: kind:"doc", name, source, size, addedAt, text
 | 表格保形蒸馏（v2.6） | `distill.ts` `isTableChunk` 检测 GFM `|` 表 / `<table>` → 用 `DISTILL_TABLE_SYSTEM_PROMPT` 要求保留 markdown 表格结构，提取关键字段 | 非表格 → 原 `DISTILL_SYSTEM_PROMPT` 概括 |
 | 索引增量 | `BM25Index.addDocChunks`/`removeDocChunks` 增量维护 df/avgLen/byDocIndex；单篇导入/删除不整库 rebuild | 索引未初始化时跳过 |
 | 检索链路追踪 | `SearchResult.trace`（变体/各路命中/证据门/耗时/拒答原因/通道）；前端 🔧 展开面板；`recordSearch` 聚合 `reasonCounts`/`channelCounts` 进 metrics | trace 未生成时面板不显示 |
-| 行情数据直查 | `marketData.ts`：`isMarketQuery` 关键词判定（排除定义类问题）→ 东财 push2 接口（直连 2.5s 失败退 Firecrawl rawHtml 9s）→ `directAnswer=true` 前端跳过 LLM；覆盖 7 个主流指数 | 接口失败/非行情问题 → 正常走知识库检索 |
+| ~~行情数据直查~~（v2.8.1 已按产品决策移除） | 检索主链路统一为：**知识库 → LLM →（拒答后用户手动）联网兜底**，任何问题不再被外部数据源截胡；`marketData.ts` 模块保留未删（判定函数 + push2 取数能力），需要时可重新挂回 | — |
 | 兜底来源可信度排序 | `webSearch.ts` `rankByCredibility`：域名白名单 +100（交易所/东财/官方）/黑名单 −50（UGC/内容农场）+ 引擎共识 +10×N；排序在抓取前（Top-N 抓最可信来源） | 排序失败退回 SearXNG 原序 |
 | 运维指标 | `GET /api/metrics` + `search.recordSearch` 上报；进程内存级（重启归零） | Qdrant 不可用时 stats 置零 |
 | 反馈数据 | `POST/GET /api/feedback`，Qdrant `kqa_feedback`，自动 prune 500 条 | — |

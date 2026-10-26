@@ -215,21 +215,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return;
     }
 
-    // 2d. 事实/行情直查：命中极强（phraseHit + topScore 很高）→ 跳过 LLM，
+    // 2d. 事实直查：命中极强（phraseHit + topScore 很高）→ 跳过 LLM，
     //     直接把片段文本当答案（零延迟零幻觉，引用定位照常）。
-    //     行情直查：search.trace.channel === 'market-data'，hits[0].text 已是格式化行情文本。
-    //     top1 命中且分数断崖式领先（第 2 名不到一半）才走直查；行情直查只有 1 条 hit 无需断崖判定。
+    //     top1 命中且分数断崖式领先（第 2 名不到一半）才走直查。
+    //     （v2.8.1 行情/基差直查通道已移除——所有问题先走知识库，拒答后由联网兜底接手。）
     if (search.directAnswer && search.hits.length) {
       const top = search.hits[0]!;
-      const isMarket = search.trace?.channel === 'market-data';
       const second = search.hits[1];
-      const cliffGap = isMarket || !second || (second.fused < top.fused * 0.5);
+      const cliffGap = !second || (second.fused < top.fused * 0.5);
       if (cliffGap) {
         const text = top.parentText || top.text;
         const used = new Set<number>([1]);
         set((s) => ({
           messages: s.messages.map((m) => m.id === botId
-            ? { ...m, text: isMarket ? text : `[1] ${text}`, used, streaming: false, direct: !isMarket, marketDirect: isMarket }
+            ? { ...m, text: `[1] ${text}`, used, streaming: false, direct: true }
             : m),
         }));
         localStorage.setItem(LS_KEY, serialize(get().messages));

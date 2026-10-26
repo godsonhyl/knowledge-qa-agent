@@ -1,8 +1,9 @@
 /* ============================================================
-   tests/marketData.test.ts —— 行情直查 + 可信度排序单测
+   tests/marketData.test.ts —— 行情模块判定函数 + 可信度排序单测
+   v2.8.1 起行情/基差直查通道从 search 路由移除（一切先走知识库），
+   marketData 模块保留（判定函数 + push2 取数能力），测试验证判定逻辑本身。
    §MD-1 isMarketQuery：行情类问题识别（排除定义类问题）
-   §MD-2 extractIndexCode：名称/代码/大盘默认映射
-   §MD-3 formatQuote：文本含日期+来源+关键字段
+   §MD-2 tryMarketDirect：取数（外网依赖，允许 null）
    §CR-1 credibilityScore：白名单优先、黑名单靠后、原序平局
    ============================================================ */
 import { describe, it, expect } from 'vitest';
