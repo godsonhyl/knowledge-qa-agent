@@ -4,7 +4,7 @@
 import { ENV, embedReady } from './env.js';
 import { uuidv4, chunkIdFor } from './ids.js';
 import { chunkDocument } from './chunker.js';
-import { embed, embedInputFor } from './embeddings.js';
+import { embed, embedInputFor, invalidateEmbedCache } from './embeddings.js';
 import {
   ensureCollection, ensurePayloadIndex, upsertPoints, scrollAll,
   deleteByFilter, deletePoints, dropCollection,
@@ -279,6 +279,7 @@ export async function clearAll(): Promise<void> {
   await dropCollection(COLLECTION_CHUNKS);
   await dropCollection(COLLECTION_DOCS);
   payloadIndexEnsured = false;
+  await invalidateEmbedCache();   // 知识库清空，嵌入缓存一并清（避免污染后续重导）
   await ensureCollections();
 }
 

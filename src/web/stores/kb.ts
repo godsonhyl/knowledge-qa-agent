@@ -52,6 +52,8 @@ interface KbState {
   syncConfluence: () => Promise<void>;
   loadSeed: () => Promise<void>;
   removeDoc: (docId: string) => Promise<void>;
+  /** 更新文档内容（保留 docId，对话历史 hitRefs 不失效；蒸馏知识点会丢） */
+  updateDoc: (docId: string, text: string) => Promise<boolean>;
   clearAll: () => Promise<void>;
   startDistill: (docId: string) => Promise<void>;
   stopDistill: () => void;
@@ -299,6 +301,34 @@ export const useKbStore = create<KbState>((set, get): KbState => ({
     }
     get().toast('已删除', 'ok');
     await get().refresh();
+  },
+
+  updateDoc: async (docId, text) => {
+    let adminToken = sessionStorage.getItem('kqa.adminToken') || '';
+    if (!adminToken) {
+      const tok = window.prompt('更新文档内容需要管理员令牌。请输入 ADMIN_TOKEN：');
+      if (!tok) return false;
+      adminToken = tok.trim();
+      sessionStorage.setItem('kqa.adminToken', adminToken);
+    }
+    const r = await api<{ ok?: boolean }>(`/api/kb/docs/${docId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-Admin-Token': adminToken },
+      body: JSON.stringify({ text }),
+    });
+    if (!r.ok) {
+      if (r.status === 403) {
+        sessionStorage.removeItem('kqa.adminToken');
+        const msg = (r.data && typeof r.data === 'object' && 'error' in r.data) ? String((r.data as { error: string }).error) : '管理员令牌错误，请重试';
+        get().toast(msg, 'err');
+      } else {
+        get().toast('更新失败', 'err');
+      }
+      return false;
+    }
+    get().toast('文档已更新（已重新切块与嵌入）', 'ok');
+    await get().refresh();
+    return true;
   },
 
   clearAll: async () => {

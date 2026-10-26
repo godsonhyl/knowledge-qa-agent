@@ -264,6 +264,28 @@ kb.get('/docs/:docId', async (c) => {
   });
 });
 
+/** PUT /api/kb/docs/:docId —— 更新文档内容（保留 docId）。
+ *  重名检查跳过（同 docId 即同 docName）；管理员令牌。
+ *  复用 updateDocContent：删旧块 → 重新切块 + 嵌入 → upsert。
+ *  蒸馏知识点会丢（切块边界变了）；保留 docId 意味着对话历史里的 hitRefs 不失效。
+ *  不带 text 字段 → 400；文档不存在 → 404。 */
+kb.put('/docs/:docId', async (c) => {
+  if (!adminGate(c)) return adminError(c);
+  const body = await c.req.json().catch(() => null);
+  if (!body || typeof body.text !== 'string') return c.json({ error: '需要 {text}' }, 400);
+  try {
+    await kbIndex.run(() => updateDocContent(c.req.param('docId'), body.text));
+    invalidateRerankCache();
+    // BM25 索引：旧块已删，新块要重建（chunk id 是 docId:index 派生，幂等可全量 rebuild）
+    await kbIndex.run(() => kbIndex.rebuild());
+    const u = (c as any).get('ssoUser') as any | undefined;
+    audit(u?.sub || '', u?.username || '', 'doc_update', `docId=${c.req.param('docId')} size=${body.text.length}`, c.req.header('x-forwarded-for') || '');
+    return c.json({ ok: true });
+  } catch (err) {
+    return jsonError(c, err);
+  }
+});
+
 /** DELETE /api/kb/docs/:docId —— 删除一篇（管理员令牌） */
 kb.delete('/docs/:docId', async (c) => {
   if (!adminGate(c)) return adminError(c);
