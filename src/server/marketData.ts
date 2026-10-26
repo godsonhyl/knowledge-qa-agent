@@ -33,6 +33,15 @@ const MARKET_KEYWORDS = [
   '涨跌幅', '涨跌', '指数点位',
 ];
 
+/** 含期货/基差/期现的问题——现货直查答不全（需要期货价才能算基差），
+ *  放行不直查，让问题正常走知识库/联网兜底，避免"只甩现货数据"的答非所问。 */
+const FUTURES_KEYWORDS = [
+  '基差', '期现', '现货与期货', '现货和期货', '期货与现货', '期货和现货',
+  '升水', '贴水', '年化基差', '基差率',
+  '股指期货', '主力合约', '当月连续', '次月', '当季', '次季',
+  'IM现货', 'IC现货', 'IF现货', 'IH现货',
+];
+
 /** 直连超时：宿主机无外网出口时快速失败让路给 Firecrawl */
 const DIRECT_TIMEOUT_MS = 2500;
 /** Firecrawl 备路超时：rawHtml 抓取实测 3-8s */
@@ -43,6 +52,8 @@ export function isMarketQuery(question: string): boolean {
   const q = question.toLowerCase();
   // 排除明显在问"是什么/怎么算/原理"的定义类问题——这些走知识库
   if (/是什么|什么叫|什么意思|定义|原理|公式|怎么算|如何计算|区别|含义|什么是|是指什么/.test(q)) return false;
+  // 含期货/基差/期现的问题——现货直查答不全（需期货价才能算基差），放行让联网兜底处理
+  if (FUTURES_KEYWORDS.some((kw) => q.includes(kw.toLowerCase()))) return false;
   // 必须命中至少一个行情关键词
   return MARKET_KEYWORDS.some((kw) => q.includes(kw.toLowerCase()));
 }

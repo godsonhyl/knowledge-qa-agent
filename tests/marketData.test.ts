@@ -22,6 +22,12 @@ describe('§MD-1 isMarketQuery', () => {
     expect(isMarketQuery('自成交检查怎么做')).toBe(false);
     expect(isMarketQuery('撮合延迟典型范围')).toBe(false);
   });
+  it('期货/基差/期现类问题不放直查（现货数据答不全，避免答非所问）', () => {
+    expect(isMarketQuery('中证1000 现货与期货 实时基差')).toBe(false);
+    expect(isMarketQuery('中证1000股指期货 基差')).toBe(false);
+    expect(isMarketQuery('IM 主力合约 升贴水')).toBe(false);
+    expect(isMarketQuery('沪深300 期货与现货 基差率')).toBe(false);
+  });
 });
 
 describe('§MD-2 extractIndexCode（经 tryMarketDirect 行为验证）', () => {
