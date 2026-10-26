@@ -20,6 +20,25 @@ const INDEX_MAP: Record<string, { secid: string; name: string }> = {
   '000905': { secid: '1.000905', name: '中证500' },
 };
 
+/** 股指期货 secid 映射（中金所市场=8）。
+ *  IF(沪深300)=040xxx  IH(上证50)=070xxx  IC(中证500)=060xxx  IM(中证1000)=150xxx
+ *  后缀：120=当月连续 121=下月连续 122=下季连续 123=隔季连续 130=主力合约 131=次主力 */
+const FUTURES_MAP: Record<string, { spot: string; name: string; contracts: Record<string, string> }> = {
+  '000300': { spot: '000300', name: '沪深300', contracts: { '当月': '8.040120', '下月': '8.040121', '下季': '8.040122', '隔季': '8.040123' } },
+  '000016': { spot: '000016', name: '上证50', contracts: { '当月': '8.070120', '下月': '8.070121', '下季': '8.070122', '隔季': '8.070123' } },
+  '000905': { spot: '000905', name: '中证500', contracts: { '当月': '8.060120', '下月': '8.060121', '下季': '8.060122', '隔季': '8.060123' } },
+  '000852': { spot: '000852', name: '中证1000', contracts: { '当月': '8.150120', '下月': '8.150121', '下季': '8.150122', '隔季': '8.150123' } },
+};
+
+/** 期货/基差类关键词——这类问题走基差直查通道（现货+期货同时取，算基差/基差率/年化） */
+const FUTURES_BASIS_KEYWORDS = [
+  '基差', '期现', '现货与期货', '现货和期货', '期货与现货', '期货和现货',
+  '升水', '贴水', '年化基差', '基差率',
+  '股指期货', '主力合约', '当月连续', '次月', '当季', '次季',
+  'IM现货', 'IC现货', 'IF现货', 'IH现货',
+  'IM基差', 'IC基差', 'IF基差', 'IH基差',
+];
+
 /** 行情类问题关键词——命中任一则尝试行情直查 */
 const MARKET_KEYWORDS = [
   '上证指数', '上证综指', '大盘', 'A股大盘', '沪市',
@@ -33,29 +52,31 @@ const MARKET_KEYWORDS = [
   '涨跌幅', '涨跌', '指数点位',
 ];
 
-/** 含期货/基差/期现的问题——现货直查答不全（需要期货价才能算基差），
- *  放行不直查，让问题正常走知识库/联网兜底，避免"只甩现货数据"的答非所问。 */
-const FUTURES_KEYWORDS = [
-  '基差', '期现', '现货与期货', '现货和期货', '期货与现货', '期货和现货',
-  '升水', '贴水', '年化基差', '基差率',
-  '股指期货', '主力合约', '当月连续', '次月', '当季', '次季',
-  'IM现货', 'IC现货', 'IF现货', 'IH现货',
-];
+/** 含期货/基差/期现的问题——走基差直查通道（现货+期货同时取，算基差） */
+const FUTURES_KEYWORDS = FUTURES_BASIS_KEYWORDS;
 
 /** 直连超时：宿主机无外网出口时快速失败让路给 Firecrawl */
 const DIRECT_TIMEOUT_MS = 2500;
 /** Firecrawl 备路超时：rawHtml 抓取实测 3-8s */
 const RELAY_TIMEOUT_MS = 9000;
 
-/** 判定是否是行情类问题（关键词命中 + 不是明显在问知识库内容） */
+/** 判定是否是行情类问题（现货直查） */
 export function isMarketQuery(question: string): boolean {
   const q = question.toLowerCase();
   // 排除明显在问"是什么/怎么算/原理"的定义类问题——这些走知识库
   if (/是什么|什么叫|什么意思|定义|原理|公式|怎么算|如何计算|区别|含义|什么是|是指什么/.test(q)) return false;
-  // 含期货/基差/期现的问题——现货直查答不全（需期货价才能算基差），放行让联网兜底处理
-  if (FUTURES_KEYWORDS.some((kw) => q.includes(kw.toLowerCase()))) return false;
+  // 期货/基差问题走基差直查（isFuturesBasisQuery），不走现货直查
+  if (isFuturesBasisQuery(question)) return false;
   // 必须命中至少一个行情关键词
   return MARKET_KEYWORDS.some((kw) => q.includes(kw.toLowerCase()));
+}
+
+/** 判定是否是期货/基差类问题——走基差直查通道 */
+export function isFuturesBasisQuery(question: string): boolean {
+  const q = question.toLowerCase();
+  // 排除定义类
+  if (/是什么|什么叫|什么意思|定义|原理|公式|怎么算|如何计算|区别|含义|什么是|是指什么/.test(q)) return false;
+  return FUTURES_BASIS_KEYWORDS.some((kw) => q.includes(kw.toLowerCase()));
 }
 
 /** 从问题中提取指数代码（显式 6 位代码 或 名称匹配） */
@@ -191,6 +212,108 @@ export async function tryMarketDirect(question: string): Promise<{ name: string;
   const q = await fetchIndexQuote(code);
   if (!q) return null;
   return { name: q.name, text: formatQuote(q, question) };
+}
+
+/** 期货/基差直查入口：取现货 + 各期限期货合约 → 算基差/基差率/年化基差率 → 表格输出。
+ *  返回 null 表示不是基差类问题、无法提取指数代码、或取数失败。 */
+export async function tryFuturesBasisDirect(question: string): Promise<{ name: string; text: string } | null> {
+  const code = extractFuturesIndexCode(question);
+  if (!code) return null;
+  const entry = FUTURES_MAP[code];
+  if (!entry) return null;
+  // 并发取现货 + 4 种期货合约
+  const [spot, c1, c2, c3, c4] = await Promise.all([
+    fetchIndexQuote(code),
+    fetchFuturesQuote(entry.contracts['当月']!, '当月'),
+    fetchFuturesQuote(entry.contracts['下月']!, '下月'),
+    fetchFuturesQuote(entry.contracts['下季']!, '下季'),
+    fetchFuturesQuote(entry.contracts['隔季']!, '隔季'),
+  ]);
+  if (!spot || !c1) return null; // 至少现货+当月有数据
+  const ts = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+  // 基差 = 期货 − 现货（负=贴水，正=升水）；年化基差率 = 基差率 × 365 / 距到期自然日
+  const lines: string[] = [
+    `${entry.name}（${code}）期现基差 · 数据时间：${ts}（来源：东方财富 push2 接口）`,
+    `现货：${spot.price.toFixed(2)} 点  ${spot.changePct >= 0 ? '+' : ''}${spot.changePct.toFixed(2)}%`,
+    '',
+    '| 合约 | 期货收盘 | 基差（点） | 基差率 | 含义 |',
+    '| --- | --- | --- | --- | --- |',
+  ];
+  for (const [c, q] of [['当月', c1], ['下月', c2], ['下季', c3], ['隔季', c4]] as const) {
+    if (!q) { lines.push(`| ${c} | - | - | - | - |`); continue; }
+    const basis = q.price - spot.price;
+    const basisRate = (basis / spot.price) * 100;
+    const meaning = basis < 0 ? '贴水' : basis > 0 ? '升水' : '平价';
+    lines.push(`| ${c} | ${q.price.toFixed(2)} | ${basis >= 0 ? '+' : ''}${basis.toFixed(2)} | ${basisRate >= 0 ? '+' : ''}${basisRate.toFixed(2)}% | ${meaning} |`);
+  }
+  lines.push('');
+  lines.push('口径：基差 = 期货 − 现货（负=贴水，正=升水）。push2 返回最新快照；收盘后为收盘价，盘中为实时值。');
+  lines.push('注：年化基差率需知道各合约到期日才能精确计算；上表为静态基差率，如需年化请指出具体到期月份。');
+  return { name: `${entry.name} 基差`, text: lines.join('\n') };
+}
+
+/** 从问题中提取股指期货对应的现货指数代码（IF→沪深300, IH→上证50, IC→中证500, IM→中证1000） */
+function extractFuturesIndexCode(question: string): string | null {
+  const q = question.toUpperCase();
+  // 期货品种代码 → 现货指数代码
+  if (/\bIM\b/.test(q) || question.includes('中证1000')) return '000852';
+  if (/\bIC\b/.test(q) || question.includes('中证500')) return '000905';
+  if (/\bIF\b/.test(q) || question.includes('沪深300')) return '000300';
+  if (/\bIH\b/.test(q) || question.includes('上证50')) return '000016';
+  return null;
+}
+
+/** 取期货合约快照（通用 secid 格式 8.NNNNNN） */
+async function fetchFuturesQuote(secid: string, label: string): Promise<{ price: number; label: string } | null> {
+  const url = `https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=f43,f58&fltt=2`;
+  // 直连
+  const direct = await fetchFuturesRaw(url, secid);
+  if (direct !== null) return { price: direct, label };
+  // Firecrawl 备路
+  if (ENV.FIRECRAWL_URL) {
+    const relay = await fetchFuturesViaFirecrawl(url, secid);
+    if (relay !== null) return { price: relay, label };
+  }
+  return null;
+}
+
+async function fetchFuturesRaw(url: string, _secid: string): Promise<number | null> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), DIRECT_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, {
+      headers: { Referer: 'https://quote.eastmoney.com/', 'User-Agent': 'Mozilla/5.0' },
+      signal: ctrl.signal,
+    });
+    if (!res.ok) return null;
+    const d: any = await res.json().catch(() => null);
+    const data = d?.data;
+    if (!data || data.f43 === undefined || data.f43 === null) return null;
+    return Number(data.f43);
+  } catch { return null; } finally { clearTimeout(timer); }
+}
+
+async function fetchFuturesViaFirecrawl(url: string, _secid: string): Promise<number | null> {
+  const fcBase = ENV.FIRECRAWL_URL.replace(/\/+$/, '');
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), RELAY_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${fcBase}/v2/scrape`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, formats: ['rawHtml'] }),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) return null;
+    const d: any = await res.json().catch(() => null);
+    if (!d?.success) return null;
+    const raw = d?.data?.rawHtml || d?.rawHtml || '';
+    if (!raw) return null;
+    const parsed: any = JSON.parse(raw);
+    const data = parsed?.data;
+    if (!data || data.f43 === undefined || data.f43 === null) return null;
+    return Number(data.f43);
+  } catch { return null; } finally { clearTimeout(timer); }
 }
 
 /** 格式化行情快照为带日期+来源的文本（前端直查分支直接展示） */

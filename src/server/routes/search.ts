@@ -6,7 +6,7 @@ import { kbIndex } from '../kbIndex.js';
 import { hybridSearch } from '../search/hybrid.js';
 import { rewriteQuery, type HistoryTurn } from '../queryRewrite.js';
 import { classifyQuestion, mergeHits } from '../multiStep.js';
-import { isMarketQuery, tryMarketDirect } from '../marketData.js';
+import { isMarketQuery, tryMarketDirect, isFuturesBasisQuery, tryFuturesBasisDirect } from '../marketData.js';
 import { recordSearch } from './metrics.js';
 import type { SearchResult, SearchTrace } from '@shared/types.js';
 
@@ -28,6 +28,28 @@ searchRoute.post('/search', async (c) => {
   const started = Date.now();
 
   // ---- 行情数据直查通道（检索前优先判定；命中则跳过知识库检索）----
+  // 先试期货/基差直查（含"基差/期货/期现"的问题），再试现货直查
+  if (isFuturesBasisQuery(question)) {
+    const fb = await tryFuturesBasisDirect(question).catch(() => null);
+    if (fb) {
+      const r: SearchResult = {
+        hits: [{ chunkId: 'futures', docId: 'futures', docName: '基差直查', section: fb.name,
+          startLine: 0, endLine: 0, startChar: 0, endChar: 0,
+          text: fb.text, summary: null, fused: 100, rel: 1 }],
+        allScored: [], hasEvidence: true, reason: 'market-data',
+        coverage: 1, matchCount: 1, termHits: 1, rarity: 1, phraseHit: 1, topScore: 100,
+        topSim: 0, terms: [], searchMs: Date.now() - started, directAnswer: true,
+        trace: {
+          question, variants: [question], lexHitCount: 0, vecHitCount: 0,
+          rerankedCount: 0, directAnswer: true, gate: { lex: true, vec: false },
+          reason: 'market-data', channel: 'market-data', searchMs: Date.now() - started,
+        },
+      };
+      recordSearch(r.searchMs, true, 'market-data', 'market-data');
+      return c.json(r);
+    }
+    // 基差问题但取数失败 → 继续走知识库/联网兜底
+  }
   if (isMarketQuery(question)) {
     const md = await tryMarketDirect(question).catch(() => null);
     if (md) {
