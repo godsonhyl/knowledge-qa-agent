@@ -10,3 +10,5 @@ coverage/
 selftest-report.txt
 backups/
 pnpm-lock.yaml
+*.swp
+*.swo
