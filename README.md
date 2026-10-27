@@ -12,6 +12,8 @@ TS 重构版：**Hono + React + Qdrant**，知识库存服务端 Qdrant（无 lo
 |---|---|
 | **README.md**（本文件） | 快速开始 / 架构速览 / 环境变量 / 导入方式 |
 | [CONTRACTS.md](./CONTRACTS.md) | **契约与规范**：防幻觉契约、检索阈值契约、引用规范、回答规范、不可改阈值清单 |
+| [REQUIREMENTS.md](./REQUIREMENTS.md) | **需求全历程**：初始需求 → 各期迭代 → 三条主线复盘 → 版本-需求映射 |
+| [OBSERVABILITY.md](./OBSERVABILITY.md) | **可观测性与回溯**：五步定位法 / trace 解读 / 负样本闭环 / 踩坑教训 / 排障 SOP |
 | [DESIGN.md](./DESIGN.md) | 技术设计与运维：架构 / 技术栈 / 部署 / 运维 / 可观测 / 扩展点 / 数据模型 |
 | [CLAUDE.md](./CLAUDE.md) | Claude Code 工作指南：命令 / 关键约束 / 测试即契约 |
 
